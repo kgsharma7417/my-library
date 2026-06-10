@@ -8,13 +8,36 @@ import {
   deleteObject,
 } from "firebase/storage";
 import { db, storage } from "../firebase";
-import { useParams, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 import QRCode from "qrcode";
 import ShiftSelector from "../components/ShiftSelector";
 
 export default function StudentProfile() {
-  const { id } = useParams();
   const navigate = useNavigate();
+
+  const { user } = useAuth();
+  useEffect(() => {
+    const fetchStudentId = async () => {
+      if (!user?.uid) return;
+
+      try {
+        const userSnap = await getDoc(doc(db, "users", user.uid));
+
+        if (userSnap.exists()) {
+          const data = userSnap.data();
+
+          setId(data.studentId);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+
+    fetchStudentId();
+  }, [user]);
+
+  const [id, setId] = useState(null);
   const photoInputRef = useRef(null);
 
   const [student, setStudent] = useState(null);
@@ -32,7 +55,10 @@ export default function StudentProfile() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    if (!id) return;
+
     setMounted(true);
+
     fetchStudent();
   }, [id]);
 

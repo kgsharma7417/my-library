@@ -1,9 +1,12 @@
 // src/components/Navbar.jsx
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom"; // 1. useNavigate add kiya
 import { useState, useEffect } from "react";
+import { signOut } from "firebase/auth"; // 2. Firebase signOut import kiya
+import { auth } from "../firebase"; // 3. Firebase auth config import kiya
 
 export default function Navbar() {
   const location = useLocation();
+  const navigate = useNavigate(); // 4. Hook initialize kiya
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -12,6 +15,17 @@ export default function Navbar() {
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  // 5. Logout Handler Function (Error handling ke saath)
+  const handleLogout = async () => {
+    if (!confirm("Kya aap log out karna chahte hain?")) return;
+    try {
+      await signOut(auth);
+      navigate("/login"); // Logout ke baad seedhe login page pr bhejega
+    } catch (err) {
+      alert("Logout fail hua: " + err.message);
+    }
+  };
 
   const links = [
     {
@@ -207,7 +221,7 @@ export default function Navbar() {
             transition: "height 0.6s cubic-bezier(0.16, 1, 0.3, 1)",
           }}
         >
-          {/* ── Logo Block with Animated Chroma Shifting ── */}
+          {/* ── Logo Block ── */}
           <Link
             to="/"
             style={{
@@ -226,7 +240,7 @@ export default function Navbar() {
                 borderRadius: "10px",
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
+                justifyGround: "center",
               }}
             >
               <svg
@@ -294,18 +308,16 @@ export default function Navbar() {
                     {link.icon}
                   </span>
                   {link.label}
-
-                  {/* Active Neon Dynamic Line Indicator */}
                   {isActive && <span className="active-glow-line" />}
                 </Link>
               );
             })}
           </div>
 
-          {/* ── Premium System Engine Badge ── */}
+          {/* ── Premium System Engine Badge & DESKTOP LOGOUT BUTTON ── */}
           <div
             className="desktop-nav"
-            style={{ display: "flex", alignItems: "center" }}
+            style={{ display: "flex", alignItems: "center", gap: "12px" }}
           >
             <div
               className="system-status"
@@ -326,6 +338,43 @@ export default function Navbar() {
               <span className="live-pulse-radar" />
               <span className="chroma-status-text">System Live</span>
             </div>
+
+            {/* 6. Desktop Logout Button Integration */}
+            <button
+              onClick={handleLogout}
+              className="logout-btn"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "10px 16px",
+                background: "rgba(239, 68, 68, 0.1)",
+                border: "1px solid rgba(239, 68, 68, 0.2)",
+                borderRadius: "22px",
+                color: "#ef4444",
+                fontSize: "12px",
+                fontWeight: "700",
+                textTransform: "uppercase",
+                cursor: "pointer",
+                transition: "all 0.3s ease",
+              }}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="14"
+                height="14"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+              Logout
+            </button>
           </div>
 
           {/* ── Fluid Kinetic Hamburger Button ── */}
@@ -454,13 +503,53 @@ export default function Navbar() {
               </Link>
             );
           })}
+
+          {/* 7. Mobile Logout Button Integration (Spans full width at bottom) */}
+          <button
+            onClick={() => {
+              setMenuOpen(false);
+              handleLogout();
+            }}
+            style={{
+              gridColumn: "1 / -1",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "8px",
+              padding: "16px",
+              background: "rgba(239, 68, 68, 0.1)",
+              border: "1px solid rgba(239, 68, 68, 0.15)",
+              borderRadius: "16px",
+              color: "#f87171",
+              fontSize: "13px",
+              fontWeight: "700",
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+            }}
+            className="mobile-logout-btn"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+              <polyline points="16 17 21 12 16 7"></polyline>
+              <line x1="21" y1="12" x2="9" y2="12"></line>
+            </svg>
+            Logout From Account
+          </button>
         </div>
       </div>
 
-      {/* ── Highly Advanced Performance CSS Architecture ── */}
+      {/* ── Performance CSS Engine ── */}
       <style>{`
         :root {
-          /* Dynamic Spectrum Matrix Definitions */
           --chroma-1: #6366f1;
           --chroma-2: #a855f7;
           --chroma-3: #ec4899;
@@ -468,14 +557,12 @@ export default function Navbar() {
           --chroma-border: rgba(255, 255, 255, 0.05);
         }
 
-        /* Continuous High-Refresh Color Orbit Animation */
         @keyframes dynamicColorFlow {
           0% { background-position: 0% 50%; }
           50% { background-position: 100% 50%; }
           100% { background-position: 0% 50%; }
         }
 
-        /* Applied to Brand Logo and Fill Elements */
         .chroma-text {
           background: linear-gradient(90deg, #ffffff, #c084fc, #6366f1, #38bdf8, #ffffff);
           background-size: 300% auto;
@@ -492,7 +579,6 @@ export default function Navbar() {
           box-shadow: 0 0 25px rgba(99, 102, 241, 0.45);
         }
 
-        /* Hover Physics Optimization */
         .nav-item:not(.active-item):hover {
           color: #f8fafc !important;
           background: rgba(255, 255, 255, 0.04);
@@ -503,7 +589,6 @@ export default function Navbar() {
           color: #a5b4fc;
         }
 
-        /* Active Luminous Complex State */
         .active-item {
           background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(168, 85, 247, 0.03)) !important;
           border: 1px solid rgba(168, 85, 247, 0.2) !important;
@@ -514,7 +599,19 @@ export default function Navbar() {
           filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.6));
         }
 
-        /* Dynamic Border Bottom Glow Engine */
+        /* 8. Desktop Logout Button Hover Effect */
+        .logout-btn:hover {
+          background: rgba(239, 68, 68, 0.25) !important;
+          border-color: rgba(239, 68, 68, 0.4) !important;
+          box-shadow: 0 0 20px rgba(239, 68, 68, 0.2);
+          transform: translateY(-1px);
+        }
+
+        /* 9. Mobile Logout Hover Effect */
+        .mobile-logout-btn:active {
+          background: rgba(239, 68, 68, 0.2) !important;
+        }
+
         .active-glow-line {
           position: absolute;
           bottom: -4px;
@@ -526,7 +623,6 @@ export default function Navbar() {
           border-radius: 20px;
         }
 
-        /* System Radar Engine Styles */
         .system-status {
           background: rgba(255, 255, 255, 0.01);
           border: 1px solid rgba(255, 255, 255, 0.05);
@@ -545,7 +641,6 @@ export default function Navbar() {
           animation: dynamicColorFlow 4s linear infinite;
         }
 
-        /* Futuristic Pulse Radar Ring */
         .live-pulse-radar {
           width: 7px;
           height: 7px;
@@ -567,7 +662,6 @@ export default function Navbar() {
           100% { transform: scale(2.4); opacity: 0; }
         }
 
-        /* Mobile Dynamic Touch Surfaces */
         .mobile-inactive-card {
           color: #8e9cae;
           background: rgba(255, 255, 255, 0.01);
@@ -581,11 +675,8 @@ export default function Navbar() {
           border: 1px solid rgba(168, 85, 247, 0.25);
           box-shadow: 0 12px 30px -4px rgba(168, 85, 247, 0.25);
         }
-        .mobile-active-card .mobile-icon {
-          color: #c084fc;
-        }
+        .mobile-active-card .mobile-icon { color: #c084fc; }
 
-        /* Responsive Breakpoint Engine */
         @media (max-width: 1240px) {
           .desktop-nav { display: none !important; }
           .hamburger-btn { display: flex !important; }
