@@ -12,7 +12,7 @@ const SHIFT_CONFIG = {
         className="w-4 h-4"
         fill="none"
         stroke="currentColor"
-        strokeWidth={2}
+        strokeWidth={2.5}
         viewBox="0 0 24 24"
       >
         <path
@@ -22,13 +22,14 @@ const SHIFT_CONFIG = {
         />
       </svg>
     ),
-    bg: "bg-amber-50",
-    border: "border-amber-200",
+    bg: "bg-amber-50/60 backdrop-blur-md",
+    border: "border-amber-100",
     text: "text-amber-700",
-    accent: "bg-amber-500",
-    badge: "bg-amber-100 text-amber-800",
-    stat: "from-amber-500 to-orange-400",
-    dot: "bg-amber-400",
+    accent:
+      "bg-gradient-to-r from-amber-500 to-orange-500 shadow-lg shadow-orange-500/20",
+    badge: "bg-amber-50 text-amber-700 border border-amber-200/60",
+    stat: "from-amber-500 via-orange-500 to-amber-600",
+    shadow: "shadow-orange-500/10",
   },
   evening: {
     label: "Evening",
@@ -37,7 +38,7 @@ const SHIFT_CONFIG = {
         className="w-4 h-4"
         fill="none"
         stroke="currentColor"
-        strokeWidth={2}
+        strokeWidth={2.5}
         viewBox="0 0 24 24"
       >
         <path
@@ -47,13 +48,14 @@ const SHIFT_CONFIG = {
         />
       </svg>
     ),
-    bg: "bg-sky-50",
-    border: "border-sky-200",
+    bg: "bg-sky-50/60 backdrop-blur-md",
+    border: "border-sky-100",
     text: "text-sky-700",
-    accent: "bg-sky-500",
-    badge: "bg-sky-100 text-sky-800",
-    stat: "from-sky-500 to-blue-400",
-    dot: "bg-sky-400",
+    accent:
+      "bg-gradient-to-r from-sky-500 to-indigo-500 shadow-lg shadow-indigo-500/20",
+    badge: "bg-sky-50 text-sky-700 border border-sky-200/60",
+    stat: "from-sky-500 via-blue-500 to-indigo-600",
+    shadow: "shadow-indigo-500/10",
   },
   fullday: {
     label: "Full Day",
@@ -62,7 +64,7 @@ const SHIFT_CONFIG = {
         className="w-4 h-4"
         fill="none"
         stroke="currentColor"
-        strokeWidth={2}
+        strokeWidth={2.5}
         viewBox="0 0 24 24"
       >
         <path
@@ -72,13 +74,14 @@ const SHIFT_CONFIG = {
         />
       </svg>
     ),
-    bg: "bg-violet-50",
-    border: "border-violet-200",
+    bg: "bg-violet-50/60 backdrop-blur-md",
+    border: "border-violet-100",
     text: "text-violet-700",
-    accent: "bg-violet-500",
-    badge: "bg-violet-100 text-violet-800",
-    stat: "from-violet-500 to-purple-400",
-    dot: "bg-violet-400",
+    accent:
+      "bg-gradient-to-r from-violet-500 to-purple-500 shadow-lg shadow-purple-500/20",
+    badge: "bg-violet-50 text-violet-700 border border-violet-200/60",
+    stat: "from-violet-500 via-purple-500 to-fuchsia-600",
+    shadow: "shadow-purple-500/10",
   },
 };
 
@@ -97,7 +100,6 @@ export default function Dashboard() {
       const snap = await getDocs(collection(db, "students"));
       setStudents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
-      // Fetch saved seat config
       try {
         const cfgDoc = await getDoc(doc(db, "config", "library"));
         if (cfgDoc.exists() && cfgDoc.data().totalSeats) {
@@ -121,7 +123,7 @@ export default function Dashboard() {
     }
     if (val < occupied) {
       setSeatError(
-        `Can't set less than ${occupied} — you have ${occupied} active students.`,
+        `Can't set less than ${occupied} — active students present.`,
       );
       return;
     }
@@ -150,17 +152,19 @@ export default function Dashboard() {
     filterShift === "all"
       ? students
       : students.filter((s) => s.shift === filterShift);
-
   const shiftCount = (shift) =>
     students.filter((s) => s.shift === shift).length;
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 rounded-full border-4 border-indigo-200 border-t-indigo-600 animate-spin" />
-          <p className="text-sm text-slate-500 font-medium">
-            Loading dashboard...
+      <div className="min-h-screen bg-slate-50/50 flex items-center justify-center backdrop-blur-sm">
+        <div className="flex flex-col items-center gap-4 p-8 rounded-3xl bg-white border border-slate-100 shadow-2xl shadow-slate-100">
+          <div className="relative w-12 h-12">
+            <div className="absolute inset-0 rounded-full border-4 border-indigo-100" />
+            <div className="absolute inset-0 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin" />
+          </div>
+          <p className="text-sm text-slate-500 font-semibold tracking-wide animate-pulse">
+            Syncing System Data...
           </p>
         </div>
       </div>
@@ -168,81 +172,82 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="max-w-5xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-50 via-slate-100/70 to-zinc-50 py-8">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* ── Header ── */}
-        <div className="flex items-center justify-between mb-7 flex-wrap gap-3">
-          <div>
-            <h1 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
-              <span className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center">
-                <svg
-                  className="w-4 h-4 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2.2}
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"
-                  />
-                </svg>
-              </span>
-              Library Dashboard
-            </h1>
-            <p className="text-sm text-slate-500 mt-0.5 ml-10">
-              Live overview of students &amp; seats
-            </p>
+        <div className="flex items-center justify-between mb-8 flex-wrap gap-4 bg-white/40 backdrop-blur-md p-4 rounded-2xl border border-white/60 shadow-sm shadow-slate-100">
+          <div className="flex items-center gap-3.5">
+            <span className="w-11 h-11 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-600/20 transform hover:rotate-6 transition-all duration-300">
+              <svg
+                className="w-5 h-5 text-white"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2.2}
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"
+                />
+              </svg>
+            </span>
+            <div>
+              <h1 className="text-2xl font-black text-slate-800 tracking-tight">
+                Library Dashboard
+              </h1>
+              <p className="text-xs font-semibold text-slate-400 mt-0.5 tracking-wide uppercase">
+                Real-Time Operations Panel
+              </p>
+            </div>
           </div>
 
-          {/* Total Seats Config */}
+          {/* Config Controls */}
           <div className="flex items-center gap-2">
             {editingSeats ? (
-              <div className="flex items-center gap-2">
-                <div className="flex flex-col">
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="number"
-                      value={seatInput}
-                      onChange={(e) => {
-                        setSeatInput(e.target.value);
-                        setSeatError("");
-                      }}
-                      className="w-20 px-3 py-1.5 text-sm rounded-lg border border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200 text-slate-800"
-                      min={1}
-                      max={200}
-                      placeholder="Seats"
-                    />
-                    <button
-                      onClick={handleSeatSave}
-                      className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 transition-colors"
-                    >
-                      Save
-                    </button>
-                    <button
-                      onClick={() => {
-                        setEditingSeats(false);
-                        setSeatInput(String(totalSeats));
-                        setSeatError("");
-                      }}
-                      className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 text-xs font-semibold hover:bg-slate-100 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                  {seatError && (
-                    <p className="text-xs text-red-500 mt-1">{seatError}</p>
-                  )}
+              <div className="flex flex-col items-end bg-white p-2 rounded-xl border border-slate-200/80 shadow-lg transition-all duration-300">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={seatInput}
+                    onChange={(e) => {
+                      setSeatInput(e.target.value);
+                      setSeatError("");
+                    }}
+                    className="w-20 px-2.5 py-1.5 text-sm font-bold rounded-lg border border-indigo-200 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-slate-800 transition-all"
+                    min={1}
+                    max={200}
+                  />
+                  <button
+                    onClick={handleSeatSave}
+                    className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 active:scale-95 transition-all"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditingSeats(false);
+                      setSeatInput(String(totalSeats));
+                      setSeatError("");
+                    }}
+                    className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 text-xs font-semibold hover:bg-slate-50 active:scale-95 transition-all"
+                  >
+                    Cancel
+                  </button>
                 </div>
+                {seatError && (
+                  <p className="text-[11px] text-red-500 font-medium mt-1 mr-1">
+                    {seatError}
+                  </p>
+                )}
               </div>
             ) : (
               <button
                 onClick={() => setEditingSeats(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs font-semibold hover:bg-slate-50 hover:border-slate-300 transition-all"
+                className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200/80 bg-white/80 backdrop-blur-sm text-slate-700 text-xs font-bold shadow-sm hover:shadow-md hover:border-slate-300 hover:-translate-y-0.5 active:scale-95 transition-all duration-300"
               >
                 <svg
-                  className="w-3.5 h-3.5"
+                  className="w-4 h-4 text-slate-400 group-hover:rotate-45 transition-transform"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth={2}
@@ -259,22 +264,23 @@ export default function Dashboard() {
                     d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
                   />
                 </svg>
-                {totalSeats} Total Seats
+                Capacity Setup ({totalSeats})
               </button>
             )}
           </div>
         </div>
 
-        {/* ── Stat Cards ── */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+        {/* ── Stat Cards Grid ── */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
           <StatCard
             label="Total Students"
             value={students.length}
-            sub={`of ${totalSeats} seats`}
-            gradient="from-indigo-500 to-indigo-400"
+            sub={`of ${totalSeats} structural seats`}
+            gradient="from-indigo-600 via-indigo-700 to-purple-800"
+            shadow="shadow-indigo-600/20"
             icon={
               <svg
-                className="w-5 h-5"
+                className="w-5 h-5 text-indigo-200"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth={2}
@@ -291,32 +297,37 @@ export default function Dashboard() {
           <StatCard
             label="Morning"
             value={shiftCount("morning")}
-            sub="students"
+            sub="active rosters"
             gradient={SHIFT_CONFIG.morning.stat}
+            shadow={SHIFT_CONFIG.morning.shadow}
             icon={SHIFT_CONFIG.morning.icon}
           />
           <StatCard
             label="Evening"
             value={shiftCount("evening")}
-            sub="students"
+            sub="active rosters"
             gradient={SHIFT_CONFIG.evening.stat}
+            shadow={SHIFT_CONFIG.evening.shadow}
             icon={SHIFT_CONFIG.evening.icon}
           />
           <StatCard
             label="Full Day"
             value={shiftCount("fullday")}
-            sub="students"
+            sub="active rosters"
             gradient={SHIFT_CONFIG.fullday.stat}
+            shadow={SHIFT_CONFIG.fullday.shadow}
             icon={SHIFT_CONFIG.fullday.icon}
           />
+
           <StatCard
             label="Seats Free"
             value={freeSeats}
-            sub={`${occupancyPct}% full`}
-            gradient="from-emerald-500 to-teal-400"
+            sub={`${occupancyPct}% real occupancy`}
+            gradient="from-emerald-500 via-teal-600 to-cyan-700"
+            shadow="shadow-emerald-600/20"
             icon={
               <svg
-                className="w-5 h-5"
+                className="w-5 h-5 text-emerald-200"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth={2}
@@ -330,9 +341,9 @@ export default function Dashboard() {
               </svg>
             }
             extraSlot={
-              <div className="mt-2 w-full bg-white/30 rounded-full h-1.5 overflow-hidden">
+              <div className="mt-3 w-full bg-black/15 rounded-full h-2 p-[2px] overflow-hidden backdrop-blur-sm border border-white/10">
                 <div
-                  className="h-full bg-white/80 rounded-full transition-all duration-700"
+                  className="h-full bg-gradient-to-r from-teal-200 to-white rounded-full transition-all duration-1000 cubic-bezier(0.4,_0,_0.2,_1)"
                   style={{ width: `${occupancyPct}%` }}
                 />
               </div>
@@ -340,16 +351,16 @@ export default function Dashboard() {
           />
         </div>
 
-        {/* ── Seat Map ── */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm mb-6 overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
+        {/* ── Live Seat Map Container ── */}
+        <div className="bg-white rounded-2xl border border-slate-200/70 shadow-xl shadow-slate-200/30 mb-8 overflow-hidden transform hover:border-slate-300/80 transition-all duration-300">
+          <div className="px-6 py-4 bg-slate-50/50 backdrop-blur-sm border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shadow-inner">
                 <svg
                   className="w-4 h-4"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth={1.8}
+                  strokeWidth={2}
                   viewBox="0 0 24 24"
                 >
                   <path
@@ -360,35 +371,40 @@ export default function Dashboard() {
                 </svg>
               </div>
               <div>
-                <h2 className="text-sm font-bold text-slate-800">
-                  Live Seat Map
+                <h2 className="text-sm font-bold text-slate-800 tracking-tight">
+                  Live Library Spatial Grid
                 </h2>
-                <p className="text-xs text-slate-500">
-                  {occupiedSeats.length} occupied · {freeSeats} available
+                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mt-0.5">
+                  {occupiedSeats.length} occupied · {freeSeats} unassigned
                 </p>
               </div>
             </div>
-            {/* Legend */}
-            <div className="flex items-center gap-3 flex-wrap">
-              <LegendDot color="bg-emerald-500" label="Available" />
-              <LegendDot color="bg-red-400" label="Occupied" />
+            <div className="flex items-center gap-4 bg-white/80 border border-slate-200/60 px-3 py-1.5 rounded-xl shadow-sm">
+              <LegendDot
+                color="bg-emerald-500 ring-4 ring-emerald-500/10"
+                label="Available"
+              />
+              <LegendDot
+                color="bg-red-400 ring-4 ring-red-400/10"
+                label="Occupied"
+              />
             </div>
           </div>
-          <div className="p-4 sm:p-5">
+          <div className="p-6 bg-gradient-to-b from-white via-slate-50/20 to-white">
             <SeatLayout totalSeats={totalSeats} occupiedSeats={occupiedSeats} />
           </div>
         </div>
 
-        {/* ── Student Table ── */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
+        {/* ── Student Registry Table ── */}
+        <div className="bg-white rounded-2xl border border-slate-200/70 shadow-xl shadow-slate-200/30 overflow-hidden transform hover:border-slate-300/80 transition-all duration-300">
+          <div className="px-6 py-4 bg-slate-50/50 backdrop-blur-sm border-b border-slate-100 flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shadow-inner">
                 <svg
                   className="w-4 h-4"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth={1.8}
+                  strokeWidth={2}
                   viewBox="0 0 24 24"
                 >
                   <path
@@ -399,17 +415,17 @@ export default function Dashboard() {
                 </svg>
               </div>
               <div>
-                <h2 className="text-sm font-bold text-slate-800">
-                  Student List
+                <h2 className="text-sm font-bold text-slate-800 tracking-tight">
+                  Student Roster
                 </h2>
-                <p className="text-xs text-slate-500">
-                  {filtered.length} students shown
+                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mt-0.5">
+                  Displaying {filtered.length} Indexed Nodes
                 </p>
               </div>
             </div>
 
-            {/* Shift Filter Pills */}
-            <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Premium Shift Filter Pills */}
+            <div className="flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-xl border border-slate-200/40 backdrop-blur-sm">
               {["all", "morning", "evening", "fullday"].map((s) => {
                 const active = filterShift === s;
                 const cfg = SHIFT_CONFIG[s];
@@ -418,27 +434,27 @@ export default function Dashboard() {
                     key={s}
                     onClick={() => setFilterShift(s)}
                     className={`
-                      flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-150
+                      flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-300 ease-out active:scale-95
                       ${
                         active
                           ? s === "all"
-                            ? "bg-indigo-600 text-white shadow-sm"
-                            : `${cfg.accent} text-white shadow-sm`
-                          : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                            ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10"
+                            : `${cfg.accent} text-white`
+                          : "text-slate-600 hover:bg-white hover:text-slate-800"
                       }
                     `}
                   >
                     {s !== "all" && (
-                      <span className={active ? "text-white" : cfg.text}>
+                      <span className={active ? "text-white" : "opacity-70"}>
                         {cfg.icon}
                       </span>
                     )}
-                    {s === "all" ? "All" : cfg.label}
+                    {s === "all" ? "All Shifts" : cfg.label}
                     <span
                       className={`
-                      text-[10px] px-1.5 py-0.5 rounded-full font-bold
-                      ${active ? "bg-white/25 text-white" : "bg-white text-slate-500"}
-                    `}
+                        text-[10px] px-1.5 py-0.5 rounded-md font-black tracking-wide ml-0.5 transition-all
+                        ${active ? "bg-white/20 text-white" : "bg-slate-200/60 text-slate-600"}
+                      `}
                     >
                       {s === "all" ? students.length : shiftCount(s)}
                     </span>
@@ -448,130 +464,103 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Table — desktop */}
+          {/* Desktop Table View */}
           <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-100">
+                <tr className="bg-slate-50/60 text-slate-400 font-bold border-b border-slate-100">
                   {[
-                    "Student",
-                    "Phone",
-                    "Shift",
-                    "Seat",
-                    "End Date",
-                    "Status",
+                    "Student Identity",
+                    "Contact Node",
+                    "Assigned Shift",
+                    "Spatial Desk",
+                    "Terminus Date",
+                    "Operational Status",
                   ].map((h) => (
                     <th
                       key={h}
-                      className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide"
+                      className="px-6 py-4 text-left text-[11px] font-bold uppercase tracking-wider"
                     >
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50">
+              <tbody className="divide-y divide-slate-100/60 bg-white">
                 {filtered.map((s) => (
                   <tr
                     key={s.id}
-                    className="hover:bg-slate-50 transition-colors group"
+                    className="hover:bg-slate-50/70 transition-all duration-200 ease-in-out group"
                   >
-                    <td className="px-5 py-3.5">
+                    <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xs flex-shrink-0">
+                        <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100/60 flex items-center justify-center text-indigo-600 font-extrabold text-sm shadow-sm group-hover:scale-105 transition-transform duration-300">
                           {s.name?.charAt(0)?.toUpperCase() || "?"}
                         </div>
-                        <span className="font-semibold text-slate-800">
+                        <span className="font-bold text-slate-800 group-hover:text-indigo-600 transition-colors">
                           {s.name}
                         </span>
                       </div>
                     </td>
-                    <td className="px-5 py-3.5 text-slate-500">{s.phone}</td>
-                    <td className="px-5 py-3.5">
+                    <td className="px-6 py-4 whitespace-nowrap font-medium text-slate-500 tracking-wide">
+                      {s.phone}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
                       <ShiftBadge shift={s.shift} />
                     </td>
-                    <td className="px-5 py-3.5">
-                      <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg text-xs font-semibold">
-                        <svg
-                          className="w-3 h-3"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth={2}
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5"
-                          />
-                        </svg>
-                        {s.seatNumber}
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200/50 text-slate-700 px-2.5 py-1 rounded-lg text-xs font-bold shadow-sm">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                        Desk {s.seatNumber}
                       </span>
                     </td>
-                    <td className="px-5 py-3.5 text-slate-500 text-xs">
+                    <td className="px-6 py-4 whitespace-nowrap font-semibold text-slate-500 text-xs tracking-wider">
                       {s.endDate || "—"}
                     </td>
-                    <td className="px-5 py-3.5">
-                      <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-100 px-2.5 py-1 rounded-full text-xs font-semibold">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                        Active
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1.5 bg-emerald-50/60 text-emerald-700 border border-emerald-200/60 px-3 py-1 rounded-full text-xs font-bold shadow-sm shadow-emerald-500/5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Active Node
                       </span>
                     </td>
                   </tr>
                 ))}
-                {filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="py-16 text-center">
-                      <div className="flex flex-col items-center gap-2 text-slate-400">
-                        <svg
-                          className="w-10 h-10 opacity-40"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth={1.5}
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"
-                          />
-                        </svg>
-                        <p className="text-sm font-medium">No students found</p>
-                        <p className="text-xs">Try a different shift filter</p>
-                      </div>
-                    </td>
-                  </tr>
-                )}
+                {filtered.length === 0 && <EmptyStateRow colSpan={6} />}
               </tbody>
             </table>
           </div>
 
-          {/* Card List — mobile */}
-          <div className="sm:hidden divide-y divide-slate-100">
+          {/* Responsive Mobile Layout View */}
+          <div className="sm:hidden divide-y divide-slate-100 bg-white">
             {filtered.map((s) => (
-              <div key={s.id} className="px-4 py-3.5 flex items-start gap-3">
-                <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm flex-shrink-0 mt-0.5">
+              <div
+                key={s.id}
+                className="p-4 flex items-start gap-3 hover:bg-slate-50/40 transition-colors"
+              >
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100/60 flex items-center justify-center text-indigo-600 font-black text-sm flex-shrink-0 mt-0.5 shadow-sm">
                   {s.name?.charAt(0)?.toUpperCase() || "?"}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="font-semibold text-slate-800 text-sm truncate">
+                    <p className="font-bold text-slate-800 text-sm truncate">
                       {s.name}
                     </p>
-                    <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-0.5 rounded-full text-xs font-semibold flex-shrink-0">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    <span className="inline-flex items-center gap-1 bg-emerald-50/60 text-emerald-700 border border-emerald-200/40 px-2.5 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0">
+                      <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
                       Active
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 mt-0.5">{s.phone}</p>
-                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  <p className="text-xs font-medium text-slate-400 mt-0.5 tracking-wide">
+                    {s.phone}
+                  </p>
+                  <div className="flex items-center gap-2 mt-3 flex-wrap">
                     <ShiftBadge shift={s.shift} />
-                    <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 px-2 py-0.5 rounded-lg text-xs font-semibold">
-                      Seat {s.seatNumber}
+                    <span className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200/60 px-2 py-0.5 rounded-lg text-[11px] font-bold text-slate-600">
+                      Desk {s.seatNumber}
                     </span>
                     {s.endDate && (
-                      <span className="text-xs text-slate-400">
-                        Until {s.endDate}
+                      <span className="text-[11px] font-semibold text-slate-400 ml-auto bg-slate-100 px-2 py-0.5 rounded">
+                        Till {s.endDate}
                       </span>
                     )}
                   </div>
@@ -579,39 +568,47 @@ export default function Dashboard() {
               </div>
             ))}
             {filtered.length === 0 && (
-              <div className="py-14 text-center text-slate-400">
-                <p className="text-sm font-medium">No students found</p>
+              <div className="py-14 text-center text-slate-400 bg-slate-50/30">
+                <p className="text-xs font-bold uppercase tracking-wider">
+                  No Student Footprint Found
+                </p>
               </div>
             )}
           </div>
         </div>
 
-        <p className="text-center text-xs text-slate-400 mt-6 pb-4">
-          {students.length} registered · {freeSeats} seats available ·{" "}
-          {totalSeats} total capacity
+        {/* Footer Metrics */}
+        <p className="text-center text-[11px] font-bold uppercase tracking-widest text-slate-400 mt-8 pb-4">
+          Metric Echo: {students.length} Allocated · {freeSeats} Available ·{" "}
+          {totalSeats} Absolute Bounds
         </p>
       </div>
     </div>
   );
 }
 
-/* ─── Sub-components ─────────────────────────────────────── */
+/* ─── Sub-components (Optimized for Premium Architecture) ─────────────────────────────────────── */
 
-function StatCard({ label, value, sub, gradient, icon, extraSlot }) {
+function StatCard({ label, value, sub, gradient, shadow, icon, extraSlot }) {
   return (
     <div
-      className={`bg-gradient-to-br ${gradient} rounded-2xl p-4 text-white shadow-sm flex flex-col gap-1 col-span-1`}
+      className={`bg-gradient-to-br ${gradient} ${shadow} rounded-2xl p-5 text-white shadow-xl flex flex-col gap-1 transform hover:-translate-y-1 hover:scale-[1.02] transition-all duration-300 ease-out group relative overflow-hidden`}
     >
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-white/70 text-xs font-semibold uppercase tracking-wide">
+      <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+      <div className="flex items-center justify-between mb-1.5 relative z-10">
+        <span className="text-white/60 text-[10px] font-bold uppercase tracking-widest">
           {label}
         </span>
-        <span className="opacity-80">{icon}</span>
+        <span className="opacity-40 group-hover:opacity-90 group-hover:scale-110 transition-all duration-300 transform">
+          {icon}
+        </span>
       </div>
-      <span className="text-3xl font-bold tracking-tight leading-none">
+      <span className="text-3xl font-black tracking-tight leading-none relative z-10 drop-shadow-sm">
         {value}
       </span>
-      <span className="text-white/70 text-xs font-medium">{sub}</span>
+      <span className="text-white/60 text-[11px] font-semibold tracking-wide mt-1 relative z-10">
+        {sub}
+      </span>
       {extraSlot}
     </div>
   );
@@ -619,12 +616,13 @@ function StatCard({ label, value, sub, gradient, icon, extraSlot }) {
 
 function ShiftBadge({ shift }) {
   const cfg = SHIFT_CONFIG[shift];
-  if (!cfg) return <span className="text-xs text-slate-400">{shift}</span>;
+  if (!cfg)
+    return <span className="text-xs text-slate-400 font-bold">{shift}</span>;
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${cfg.badge}`}
+      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-transform duration-200 ${cfg.badge}`}
     >
-      {cfg.icon}
+      <span className="opacity-70">{cfg.icon}</span>
       {cfg.label}
     </span>
   );
@@ -632,9 +630,45 @@ function ShiftBadge({ shift }) {
 
 function LegendDot({ color, label }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <div className={`w-2.5 h-2.5 rounded-sm ${color}`} />
-      <span className="text-xs text-slate-500">{label}</span>
+    <div className="flex items-center gap-2">
+      <div className={`w-2 h-2 rounded-full ${color}`} />
+      <span className="text-xs font-bold text-slate-600 tracking-wide">
+        {label}
+      </span>
     </div>
+  );
+}
+
+function EmptyStateRow({ colSpan }) {
+  return (
+    <tr>
+      <td colSpan={colSpan} className="py-20 text-center bg-slate-50/10">
+        <div className="flex flex-col items-center gap-2.5 text-slate-400 animate-fade-in">
+          <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 border border-slate-200/40 shadow-inner">
+            <svg
+              className="w-5 h-5 opacity-60"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.5}
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"
+              />
+            </svg>
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              No Roster Footprints Found
+            </p>
+            <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+              Modify the active operational filter bounds above.
+            </p>
+          </div>
+        </div>
+      </td>
+    </tr>
   );
 }

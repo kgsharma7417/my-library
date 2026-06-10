@@ -203,9 +203,24 @@ export default function Attendance() {
     setScanning(false);
   };
 
-  const onScanSuccess = async (studentId) => {
+  const onScanSuccess = async (scannedText) => {
     await stopScanner();
-    const student = allStudentsRef.current.find((s) => s.id === studentId); // ← FIX: ref use karo
+
+    // Trim whitespace
+    const trimmed = scannedText.trim();
+
+    let studentId = trimmed;
+
+    // Agar JSON hai toh parse karo
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed.id) studentId = parsed.id;
+    } catch (_) {
+      // plain string hai, as-is use karo
+    }
+
+    const student = allStudentsRef.current.find((s) => s.id === studentId);
+
     if (!student) {
       setMessage({
         type: "error",

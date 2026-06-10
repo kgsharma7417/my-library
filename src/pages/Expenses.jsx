@@ -1,16 +1,14 @@
 // src/pages/Expenses.jsx
 // Ye page admin ko library ke kharche add karne deta hai
-// Jaise: Electricity bill, WiFi, Rent, Water, etc.
-// Har expense Firebase mein save hota hai
-// Finance page par automatically is data se net profit calculate hoti hai
+// Real-time listener (onSnapshot) aur proper validations ke saath optimized kiya gaya hai
 
 import { useEffect, useState } from "react";
 import {
   collection,
   addDoc,
-  getDocs,
   deleteDoc,
   doc,
+  onSnapshot, // Real-time data updates ke liye
 } from "firebase/firestore";
 import { db } from "../firebase";
 
@@ -31,71 +29,94 @@ export default function Expenses() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Form state — naya expense add karne ke liye
-  const [form, setForm] = useState({
-    category: "Electricity",
+  // Form reset state helper (Hardcoding se bachne ke liye)
+  const getInitialFormState = () => ({
+    category: CATEGORIES[0], // Hamesha array ki pehli category default rahegi
     description: "",
     amount: "",
-    date: new Date().toISOString().slice(0, 10), // aaj ki date default
+    date: new Date().toISOString().slice(0, 10), // Aaj ki date default
   });
 
-  useEffect(() => {
-    fetchExpenses();
-  }, []);
+  const [form, setForm] = useState(getInitialFormState);
 
-  // Firebase se saare expenses fetch karo
-  const fetchExpenses = async () => {
-    const snap = await getDocs(collection(db, "expenses"));
-    const data = snap.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
-      // Date ke hisaab se sort karo — nayi pehle
-      .sort((a, b) => new Date(b.date) - new Date(a.date));
-    setExpenses(data);
-    setLoading(false);
-  };
+  // useEffect: Firebase se real-time data sync karne ke liye
+  useEffect(() => {
+    const expensesRef = collection(db, "expenses");
+
+    // onSnapshot query se data real-time update hota rahega bina page refresh kiye
+    const unsubscribe = onSnapshot(
+      expensesRef,
+      (snap) => {
+        const data = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          // Date ke hisaab se sort karo — nayi pehle
+          .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+        setExpenses(data);
+        setLoading(false);
+      },
+      (err) => {
+        console.error("Fetch Error:", err);
+        alert("Data load karne mein dikkat aayi: " + err.message);
+        setLoading(false);
+      },
+    );
+
+    // Component unmount hone par listener band ho jayega (Memory leak protection)
+    return () => unsubscribe();
+  }, []);
 
   // Form field change handler
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
-    // spread operator se baaki fields same rehti hain
-    // sirf jo field change hui woh update hoti hai
   };
 
   // Naya expense Firebase mein save karo
   const handleSubmit = async () => {
-    if (!form.description || !form.amount || !form.date) {
+    const numericAmount = Number(form.amount);
+
+    // Strict Validations
+    if (!form.description.trim() || !form.amount || !form.date) {
       alert("Saari fields fill karo!");
       return;
     }
+
+    if (isNaN(numericAmount) || numericAmount <= 0) {
+      alert("Valid amount daalo (0 se bada hona chahiye)!");
+      return;
+    }
+
     setSaving(true);
     try {
       await addDoc(collection(db, "expenses"), {
         ...form,
-        amount: Number(form.amount), // string se number mein convert
+        description: form.description.trim(),
+        amount: numericAmount, // string se validated number
         createdAt: new Date().toISOString(),
       });
-      // Form reset karo
-      setForm({
-        category: "Electricity",
-        description: "",
-        amount: "",
-        date: new Date().toISOString().slice(0, 10),
-      });
-      fetchExpenses(); // list refresh karo
+
+      // Form reset karo safely
+      setForm(getInitialFormState());
+
+      // NOTA: Ab fetchExpenses() ko manually call karne ki koi zaroorat nahi hai.
+      // onSnapshot naye document ko automatic detect karke UI update kar dega!
     } catch (err) {
-      alert("Error: " + err.message);
+      alert("Error saving expense: " + err.message);
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   // Expense delete karna
-  // doc(db, "expenses", id) = specific document ka reference
-  // deleteDoc = wo document delete karo
   const handleDelete = async (id) => {
     if (!confirm("Ye expense delete karna chahte ho?")) return;
-    await deleteDoc(doc(db, "expenses", id));
-    // Local state se bhi hatao — Firebase call na karo dobara
-    setExpenses(expenses.filter((e) => e.id !== id));
+
+    try {
+      await deleteDoc(doc(db, "expenses", id));
+      // Local filter lagane ki need nahi hai, onSnapshot updates ko khud sync karega
+    } catch (err) {
+      alert("Delete karne mein dikkat aayi: " + err.message);
+    }
   };
 
   // Monthly total calculate karna
@@ -143,7 +164,6 @@ export default function Expenses() {
               onChange={handleChange}
               style={inputStyle}
             >
-              {/* CATEGORIES array se automatically options render honge */}
               {CATEGORIES.map((cat) => (
                 <option key={cat} value={cat}>
                   {cat}
@@ -238,7 +258,7 @@ export default function Expenses() {
             </div>
           </div>
 
-          {/* Expenses List */}
+          {/* Expenses List Component */}
           <div style={{ maxHeight: "420px", overflowY: "auto" }}>
             {loading ? (
               <p style={{ color: "#94a3b8" }}>Loading...</p>
@@ -269,7 +289,6 @@ export default function Expenses() {
                   }}
                 >
                   <div style={{ flex: 1 }}>
-                    {/* Category badge */}
                     <span
                       style={{
                         background: "#fee2e2",
@@ -296,7 +315,6 @@ export default function Expenses() {
                     </div>
                   </div>
                   <div style={{ textAlign: "right" }}>
-                    {/* Amount */}
                     <div
                       style={{
                         fontSize: "18px",
@@ -306,7 +324,6 @@ export default function Expenses() {
                     >
                       ₹{Number(expense.amount).toLocaleString("en-IN")}
                     </div>
-                    {/* Delete button */}
                     <button
                       onClick={() => handleDelete(expense.id)}
                       style={{
