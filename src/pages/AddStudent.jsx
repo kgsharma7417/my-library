@@ -1,5 +1,5 @@
 // src/pages/AddStudent.jsx
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import {
   collection,
   addDoc,
@@ -8,23 +8,6 @@ import {
   doc,
 } from "firebase/firestore";
 import { db } from "../firebase";
-
-const CLOUD_NAME = "dz7vbpney";
-const UPLOAD_PRESET = "YOUR_UPLOAD_PRESET"; // 👈 apna unsigned preset naam yahan daalo
-
-async function uploadToCloudinary(file, folder = "students/photos") {
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("upload_preset", UPLOAD_PRESET);
-  formData.append("folder", folder);
-  const res = await fetch(
-    `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
-    { method: "POST", body: formData },
-  );
-  if (!res.ok) throw new Error("Cloudinary upload failed");
-  const data = await res.json();
-  return data.secure_url;
-}
 import { useNavigate } from "react-router-dom";
 import ShiftSelector from "../components/ShiftSelector";
 import SeatLayout from "../components/SeatLayout";
@@ -32,7 +15,6 @@ import QRCode from "qrcode";
 
 export default function AddStudent() {
   const navigate = useNavigate();
-  const photoInputRef = useRef(null);
 
   const [form, setForm] = useState({
     name: "",
@@ -44,8 +26,7 @@ export default function AddStudent() {
     startDate: today(),
     endDate: oneMonthLater(),
   });
-  const [photoFile, setPhotoFile] = useState(null);
-  const [photoPreview, setPhotoPreview] = useState(null);
+
   const [occupiedSeats, setOccupiedSeats] = useState([]);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -54,10 +35,10 @@ export default function AddStudent() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
+    setTimeout(() => setMounted(true), 50);
     const fetchSeats = async () => {
       const snapshot = await getDocs(collection(db, "students"));
-      const seats = snapshot.docs.map((doc) => doc.data().seatNumber);
+      const seats = snapshot.docs.map((d) => d.data().seatNumber);
       setOccupiedSeats(seats.filter(Boolean).map(Number));
     };
     fetchSeats();
@@ -66,7 +47,6 @@ export default function AddStudent() {
   function today() {
     return new Date().toISOString().split("T")[0];
   }
-
   function oneMonthLater() {
     const d = new Date();
     d.setMonth(d.getMonth() + 1);
@@ -94,28 +74,17 @@ export default function AddStudent() {
     if (errors[name]) setErrors((prev) => ({ ...prev, [name]: "" }));
   };
 
-  const handlePhotoChange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setErrors((prev) => ({ ...prev, photo: "Photo must be under 5MB" }));
-      return;
-    }
-    setPhotoFile(file);
-    setPhotoPreview(URL.createObjectURL(file));
-    setErrors((prev) => ({ ...prev, photo: "" }));
-  };
-
   const handleBlur = (e) => {
     const { name } = e.target;
     const partial = {};
     if (name === "phone" && form.phone) {
       if (!/^[6-9]\d{9}$/.test(form.phone))
-        partial.phone = "Enter a valid 10-digit mobile number";
+        partial.phone = "Valid 10-digit mobile number chahiye";
     }
     if (name === "aadhaar" && form.aadhaar) {
       const digits = form.aadhaar.replace(/\s/g, "");
-      if (digits.length !== 12) partial.aadhaar = "Aadhaar must be 12 digits";
+      if (digits.length !== 12)
+        partial.aadhaar = "Aadhaar 12 digits ka hona chahiye";
     }
     if (Object.keys(partial).length)
       setErrors((prev) => ({ ...prev, ...partial }));
@@ -123,22 +92,22 @@ export default function AddStudent() {
 
   const validate = () => {
     const e = {};
-    if (!form.name.trim()) e.name = "Student name is required";
-    if (!form.phone.trim()) e.phone = "Phone number is required";
+    if (!form.name.trim()) e.name = "Student ka naam zaruri hai";
+    if (!form.phone.trim()) e.phone = "Phone number zaruri hai";
     else if (!/^[6-9]\d{9}$/.test(form.phone))
-      e.phone = "Enter a valid 10-digit mobile number";
+      e.phone = "Valid 10-digit mobile number chahiye";
     if (form.aadhaar) {
       const digits = form.aadhaar.replace(/\s/g, "");
-      if (digits.length !== 12) e.aadhaar = "Aadhaar must be 12 digits";
+      if (digits.length !== 12) e.aadhaar = "Aadhaar 12 digits ka hona chahiye";
     }
-    if (!form.seatNumber) e.seatNumber = "Please select a seat";
+    if (!form.seatNumber) e.seatNumber = "Seat select karo";
     else if (occupiedSeats.includes(Number(form.seatNumber)))
-      e.seatNumber = `Seat ${form.seatNumber} is already taken`;
-    if (!form.shift) e.shift = "Please select a shift";
+      e.seatNumber = `Seat ${form.seatNumber} already occupied hai`;
+    if (!form.shift) e.shift = "Shift select karo";
     if (form.feeAmount && Number(form.feeAmount) <= 0)
-      e.feeAmount = "Enter a valid fee amount";
+      e.feeAmount = "Valid fee amount enter karo";
     if (form.startDate && form.endDate && form.endDate < form.startDate)
-      e.endDate = "End date cannot be before start date";
+      e.endDate = "End date start date se pehle nahi ho sakti";
     return e;
   };
 
@@ -148,20 +117,14 @@ export default function AddStudent() {
       setErrors(validationErrors);
       return;
     }
-
     setLoading(true);
     try {
-      let photoURL = "";
-      if (photoFile) {
-        photoURL = await uploadToCloudinary(photoFile, "students/photos");
-      }
-
       const studentData = {
         ...form,
         aadhaar: form.aadhaar.replace(/\s/g, ""),
         seatNumber: Number(form.seatNumber),
         feeAmount: Number(form.feeAmount),
-        photoURL,
+        photoURL: "",
         status: "active",
         createdAt: new Date().toISOString(),
       };
@@ -180,13 +143,10 @@ export default function AddStudent() {
         color: { dark: "#1e1b4b", light: "#ffffff" },
       });
 
-      const qrBlob = await (await fetch(qrDataURL)).blob();
-      const qrFile = new File([qrBlob], `${docRef.id}.png`, {
-        type: "image/png",
+      await updateDoc(doc(db, "students", docRef.id), {
+        qrURL: qrDataURL,
+        qrData,
       });
-      const qrURL = await uploadToCloudinary(qrFile, "students/qrcodes");
-
-      await updateDoc(doc(db, "students", docRef.id), { qrURL, qrData });
 
       setSavedStudentId(docRef.id);
       setSuccess(true);
@@ -201,33 +161,410 @@ export default function AddStudent() {
         startDate: today(),
         endDate: oneMonthLater(),
       });
-      setPhotoFile(null);
-      setPhotoPreview(null);
       setErrors({});
       setTimeout(() => setSuccess(false), 6000);
     } catch (err) {
       console.error(err);
-      setErrors({ submit: "Failed to save student. Please try again." });
+      setErrors({
+        submit: "Student save karne mein error aaya. Dobara try karo.",
+      });
     }
     setLoading(false);
   };
 
+  const handleClear = () => {
+    setForm({
+      name: "",
+      phone: "",
+      aadhaar: "",
+      shift: "morning",
+      seatNumber: "",
+      feeAmount: "",
+      startDate: today(),
+      endDate: oneMonthLater(),
+    });
+    setErrors({});
+  };
+
   return (
-    <div
-      className={`min-h-screen bg-slate-50 px-4 py-6 sm:px-6 lg:px-8 transition-opacity duration-500 ${
-        mounted ? "opacity-100" : "opacity-0"
-      }`}
-    >
-      <div className="mx-auto max-w-3xl">
-        {/* Header */}
-        <div className="mb-8 animate-fade-in-down">
-          <div className="flex items-center gap-3 mb-1">
-            <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center shadow-sm">
+    <>
+      <style>{`
+        /* ── Reset & Base ── */
+        .as-page {
+          min-height: 100vh;
+          background: #f0f2f8;
+          padding: 32px 16px 48px;
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          opacity: 0;
+          transform: translateY(18px);
+          transition: opacity 0.5s ease, transform 0.5s ease;
+        }
+        .as-page.mounted {
+          opacity: 1;
+          transform: translateY(0);
+        }
+        .as-wrap {
+          max-width: 720px;
+          margin: 0 auto;
+        }
+
+        /* ── Page Header ── */
+        .as-header {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          margin-bottom: 28px;
+          animation: slideDown 0.45s cubic-bezier(.22,1,.36,1) both;
+        }
+        .as-header-icon {
+          width: 44px;
+          height: 44px;
+          border-radius: 14px;
+          background: linear-gradient(135deg, #6366f1, #818cf8);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: 0 4px 14px rgba(99,102,241,0.35);
+          flex-shrink: 0;
+        }
+        .as-header-icon svg { color: #fff; }
+        .as-header-text h1 {
+          font-size: 22px;
+          font-weight: 800;
+          color: #1e1b4b;
+          letter-spacing: -0.4px;
+          margin: 0 0 2px;
+        }
+        .as-header-text p {
+          font-size: 13px;
+          color: #6b7280;
+          margin: 0;
+        }
+
+        /* ── Banners ── */
+        .as-banner {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 14px 18px;
+          border-radius: 14px;
+          margin-bottom: 20px;
+          animation: slideInLeft 0.35s cubic-bezier(.22,1,.36,1) both;
+        }
+        .as-banner-success {
+          background: #ecfdf5;
+          border: 1.5px solid #a7f3d0;
+          color: #065f46;
+        }
+        .as-banner-error {
+          background: #fef2f2;
+          border: 1.5px solid #fecaca;
+          color: #991b1b;
+        }
+        .as-banner-inner { display: flex; align-items: center; gap: 12px; }
+        .as-banner-check {
+          width: 28px;
+          height: 28px;
+          border-radius: 50%;
+          background: #10b981;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .as-banner-check svg { color: #fff; }
+        .as-banner-title { font-size: 13px; font-weight: 700; margin: 0 0 1px; }
+        .as-banner-sub { font-size: 12px; color: #059669; margin: 0; }
+        .as-banner-btn {
+          background: #d1fae5;
+          border: none;
+          color: #065f46;
+          font-size: 12px;
+          font-weight: 700;
+          padding: 7px 14px;
+          border-radius: 9px;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: background 0.15s;
+        }
+        .as-banner-btn:hover { background: #a7f3d0; }
+
+        /* ── Card ── */
+        .as-card {
+          background: #fff;
+          border-radius: 20px;
+          border: 1.5px solid #e5e7eb;
+          box-shadow: 0 2px 20px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04);
+          overflow: hidden;
+          margin-bottom: 20px;
+        }
+
+        /* ── Section ── */
+        .as-section {
+          padding: 24px 24px;
+          animation: fadeUp 0.4s cubic-bezier(.22,1,.36,1) both;
+        }
+        .as-section-heading {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          margin-bottom: 20px;
+        }
+        .as-section-icon {
+          width: 30px;
+          height: 30px;
+          border-radius: 9px;
+          background: #eef2ff;
+          border: 1.5px solid #c7d2fe;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #6366f1;
+          flex-shrink: 0;
+          margin-top: 1px;
+        }
+        .as-section-title {
+          font-size: 14px;
+          font-weight: 800;
+          color: #1e1b4b;
+          margin: 0 0 2px;
+        }
+        .as-section-sub {
+          font-size: 12px;
+          color: #9ca3af;
+          margin: 0;
+        }
+        .as-divider {
+          height: 1px;
+          background: #f1f3f9;
+          margin: 0 24px;
+        }
+
+        /* ── Grid ── */
+        .as-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 16px;
+        }
+        .as-col-full { grid-column: 1 / -1; }
+        @media (max-width: 560px) {
+          .as-grid { grid-template-columns: 1fr; }
+          .as-col-full { grid-column: 1; }
+        }
+
+        /* ── Field ── */
+        .as-field { display: flex; flex-direction: column; gap: 6px; }
+        .as-label {
+          font-size: 11px;
+          font-weight: 700;
+          color: #6b7280;
+          text-transform: uppercase;
+          letter-spacing: 0.6px;
+        }
+        .as-label-req { color: #ef4444; margin-left: 2px; }
+        .as-input-wrap { position: relative; }
+        .as-input-icon {
+          position: absolute;
+          left: 12px;
+          top: 50%;
+          transform: translateY(-50%);
+          color: #9ca3af;
+          pointer-events: none;
+          display: flex;
+          align-items: center;
+        }
+        .as-input {
+          width: 100%;
+          box-sizing: border-box;
+          border-radius: 12px;
+          border: 1.5px solid #e5e7eb;
+          background: #fafbff;
+          color: #1e1b4b;
+          font-size: 14px;
+          padding: 10px 12px 10px 38px;
+          outline: none;
+          transition: border-color 0.18s, box-shadow 0.18s, background 0.18s;
+          font-family: inherit;
+        }
+        .as-input.no-icon { padding-left: 12px; }
+        .as-input:hover:not(:focus) { border-color: #c7d2fe; background: #f5f7ff; }
+        .as-input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12); background: #fff; }
+        .as-input.error { border-color: #fca5a5; background: #fff8f8; }
+        .as-input.error:focus { border-color: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.1); }
+        .as-input.valid { border-color: #6ee7b7; background: #f0fdf4; }
+        .as-input-tick {
+          position: absolute;
+          right: 12px;
+          top: 50%;
+          transform: translateY(-50%);
+          color: #10b981;
+          display: flex;
+        }
+        .as-error-msg {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 11.5px;
+          color: #ef4444;
+          font-weight: 500;
+        }
+        .as-hint { font-size: 11.5px; color: #9ca3af; }
+
+        /* ── Fee Chips ── */
+        .as-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .as-chip {
+          padding: 5px 12px;
+          border-radius: 8px;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+          border: 1.5px solid #e5e7eb;
+          background: #f8fafc;
+          color: #6b7280;
+          transition: all 0.15s ease;
+        }
+        .as-chip:hover { border-color: #a5b4fc; color: #6366f1; background: #eef2ff; }
+        .as-chip.active { background: #6366f1; color: #fff; border-color: #6366f1; box-shadow: 0 2px 8px rgba(99,102,241,0.28); }
+
+        /* ── QR Info ── */
+        .as-qr-info {
+          margin: 0 24px 24px;
+          background: linear-gradient(135deg, #eef2ff, #f5f3ff);
+          border: 1.5px solid #c7d2fe;
+          border-radius: 14px;
+          padding: 14px 16px;
+          display: flex;
+          align-items: center;
+          gap: 14px;
+        }
+        .as-qr-icon {
+          width: 36px;
+          height: 36px;
+          border-radius: 10px;
+          background: #c7d2fe;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #4338ca;
+          flex-shrink: 0;
+        }
+        .as-qr-title { font-size: 12px; font-weight: 700; color: #4338ca; margin: 0 0 2px; }
+        .as-qr-sub { font-size: 11.5px; color: #6366f1; margin: 0; }
+
+        /* ── Seat Legend ── */
+        .as-seat-box {
+          background: #f8fafc;
+          border: 1.5px solid #f1f3f9;
+          border-radius: 14px;
+          padding: 16px;
+        }
+        .as-legend {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          flex-wrap: wrap;
+          gap: 10px;
+          margin-bottom: 16px;
+        }
+        .as-legend-items { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+        .as-legend-dot {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 12px;
+          color: #6b7280;
+        }
+        .as-dot {
+          width: 12px;
+          height: 12px;
+          border-radius: 3px;
+        }
+        .as-dot-green { background: #10b981; }
+        .as-dot-red { background: #f87171; }
+        .as-dot-indigo { background: #6366f1; }
+        .as-seat-count { font-size: 12px; font-weight: 600; color: #6b7280; }
+
+        /* ── Submit Buttons ── */
+        .as-actions {
+          display: flex;
+          gap: 12px;
+          justify-content: flex-end;
+          flex-wrap: wrap;
+          margin-top: 24px;
+        }
+        .as-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 12px 24px;
+          border-radius: 13px;
+          font-size: 14px;
+          font-weight: 700;
+          cursor: pointer;
+          border: none;
+          outline: none;
+          transition: all 0.17s ease;
+          font-family: inherit;
+          letter-spacing: -0.1px;
+        }
+        .as-btn:active { transform: scale(0.97); }
+        .as-btn-ghost {
+          background: #fff;
+          color: #6b7280;
+          border: 1.5px solid #e5e7eb;
+        }
+        .as-btn-ghost:hover { background: #f8fafc; border-color: #c7d2fe; color: #4338ca; }
+        .as-btn-primary {
+          background: linear-gradient(135deg, #6366f1, #818cf8);
+          color: #fff;
+          box-shadow: 0 4px 14px rgba(99,102,241,0.3);
+        }
+        .as-btn-primary:hover { background: linear-gradient(135deg, #4f46e5, #6366f1); box-shadow: 0 6px 18px rgba(99,102,241,0.4); transform: translateY(-1px); }
+        .as-btn-primary:disabled { background: #e5e7eb; color: #9ca3af; box-shadow: none; transform: none; cursor: not-allowed; }
+        .as-spin {
+          animation: spin 0.8s linear infinite;
+          display: flex;
+        }
+        .as-footer-note {
+          text-align: center;
+          font-size: 12px;
+          color: #9ca3af;
+          margin-top: 20px;
+          padding-bottom: 8px;
+        }
+        .as-footer-note span { color: #ef4444; }
+
+        /* ── Animations ── */
+        @keyframes slideDown {
+          from { opacity: 0; transform: translateY(-14px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes slideInLeft {
+          from { opacity: 0; transform: translateX(-12px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes fadeUp {
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+
+      <div className={`as-page${mounted ? " mounted" : ""}`}>
+        <div className="as-wrap">
+          {/* Header */}
+          <div className="as-header">
+            <div className="as-header-icon">
               <svg
-                className="w-5 h-5 text-white"
+                width="22"
+                height="22"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth={2.2}
+                strokeWidth="2.3"
                 viewBox="0 0 24 24"
               >
                 <path
@@ -237,373 +574,352 @@ export default function AddStudent() {
                 />
               </svg>
             </div>
-            <h1 className="text-xl font-bold text-slate-800 tracking-tight">
-              Add New Student
-            </h1>
+            <div className="as-header-text">
+              <h1>New Student</h1>
+              <p>Details bharo aur seat assign karo</p>
+            </div>
           </div>
-          <p className="text-sm text-slate-500 ml-12">
-            Fill in the details to register a student and assign a seat.
-          </p>
-        </div>
 
-        {/* Success Banner */}
-        {success && (
-          <div className="mb-6 flex items-center justify-between gap-3 bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3.5 rounded-xl animate-slide-in">
-            <div className="flex items-center gap-3">
-              <div className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0">
+          {/* Success Banner */}
+          {success && (
+            <div className="as-banner as-banner-success">
+              <div className="as-banner-inner">
+                <div className="as-banner-check">
+                  <svg
+                    width="14"
+                    height="14"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M4.5 12.75l6 6 9-13.5"
+                    />
+                  </svg>
+                </div>
+                <div>
+                  <p className="as-banner-title">Student register ho gaya!</p>
+                  <p className="as-banner-sub">
+                    QR code generate hokar save ho gaya.
+                  </p>
+                </div>
+              </div>
+              {savedStudentId && (
+                <button
+                  className="as-banner-btn"
+                  onClick={() => navigate(`/students/${savedStudentId}`)}
+                >
+                  Profile dekhein →
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Submit Error */}
+          {errors.submit && (
+            <div className="as-banner as-banner-error">
+              <div className="as-banner-inner">
                 <svg
-                  className="w-3.5 h-3.5 text-white"
+                  width="18"
+                  height="18"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth={2.5}
+                  strokeWidth="2"
                   viewBox="0 0 24 24"
                 >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    d="M4.5 12.75l6 6 9-13.5"
+                    d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z"
                   />
                 </svg>
-              </div>
-              <div>
-                <p className="font-semibold text-sm">
-                  Student registered successfully!
-                </p>
-                <p className="text-xs text-emerald-600 mt-0.5">
-                  QR code generated and saved to Firebase.
-                </p>
+                <span style={{ fontSize: 13 }}>{errors.submit}</span>
               </div>
             </div>
-            {savedStudentId && (
-              <button
-                onClick={() => navigate(`/students/${savedStudentId}`)}
-                className="flex-shrink-0 text-xs font-semibold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 px-3 py-1.5 rounded-lg transition-colors"
-              >
-                View Profile →
-              </button>
-            )}
-          </div>
-        )}
+          )}
 
-        {/* Submit Error */}
-        {errors.submit && (
-          <div className="mb-6 flex items-center gap-3 bg-red-50 border border-red-200 text-red-700 px-4 py-3.5 rounded-xl text-sm animate-slide-in">
-            <svg
-              className="w-5 h-5 flex-shrink-0"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z"
-              />
-            </svg>
-            {errors.submit}
-          </div>
-        )}
-
-        {/* Main Card */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          {/* ── Photo Upload Section ── */}
-          <div className="px-5 py-5 sm:px-6 sm:py-6">
-            <SectionHeading
-              icon={CameraIcon}
-              title="Student Photo"
-              subtitle="Optional — JPG or PNG, max 5 MB"
-            />
-            <div className="mt-5 flex items-center gap-5">
-              <button
-                type="button"
-                onClick={() => photoInputRef.current?.click()}
-                className="relative w-20 h-20 rounded-2xl border-2 border-dashed border-slate-200 hover:border-indigo-300 bg-slate-50 hover:bg-indigo-50 transition-all duration-200 flex items-center justify-center overflow-hidden group flex-shrink-0"
-              >
-                {photoPreview ? (
-                  <img
-                    src={photoPreview}
-                    alt="Preview"
-                    className="w-full h-full object-cover rounded-2xl"
-                  />
-                ) : (
-                  <div className="flex flex-col items-center gap-1 text-slate-400 group-hover:text-indigo-400 transition-colors">
-                    <svg
-                      className="w-6 h-6"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={1.5}
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z"
-                      />
-                    </svg>
-                    <span className="text-[10px] font-medium">Upload</span>
-                  </div>
-                )}
-                {photoPreview && (
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl flex items-center justify-center">
-                    <span className="text-white text-[10px] font-semibold">
-                      Change
-                    </span>
-                  </div>
-                )}
-              </button>
-              <input
-                ref={photoInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handlePhotoChange}
-              />
-              <div>
-                {photoPreview ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-slate-700">
-                      {photoFile?.name}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPhotoFile(null);
-                        setPhotoPreview(null);
-                      }}
-                      className="text-xs text-red-500 hover:text-red-600 font-medium"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ) : (
-                  <p className="text-sm text-slate-500">
-                    Click to upload a photo
-                  </p>
-                )}
-                {errors.photo && (
-                  <p className="text-xs text-red-500 mt-1">{errors.photo}</p>
-                )}
-                <p className="text-xs text-slate-400 mt-1">
-                  Recommended: square crop, clear face
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <Divider />
-
-          {/* ── Personal Info Section ── */}
-          <div className="px-5 py-5 sm:px-6 sm:py-6">
-            <SectionHeading icon={PersonIcon} title="Personal Information" />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-5">
-              <Field
-                label="Student Name"
-                name="name"
-                value={form.name}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                placeholder="e.g. Rahul Kumar"
-                required
-                error={errors.name}
-                icon={
+          {/* Main Card */}
+          <div className="as-card">
+            {/* Personal Info */}
+            <div className="as-section" style={{ animationDelay: "0.05s" }}>
+              <div className="as-section-heading">
+                <div className="as-section-icon">
                   <svg
-                    className="w-4 h-4"
+                    width="16"
+                    height="16"
                     fill="none"
                     stroke="currentColor"
-                    strokeWidth={1.8}
+                    strokeWidth="1.9"
                     viewBox="0 0 24 24"
                   >
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
+                      d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0"
                     />
                   </svg>
-                }
-              />
-              <Field
-                label="Phone Number"
-                name="phone"
-                value={form.phone}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                placeholder="e.g. 9876543210"
-                required
-                error={errors.phone}
-                type="tel"
-                success={
-                  !errors.phone &&
-                  form.phone.length === 10 &&
-                  /^[6-9]\d{9}$/.test(form.phone)
-                }
-                icon={
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.8}
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"
-                    />
-                  </svg>
-                }
-              />
-              <div className="sm:col-span-2">
-                <Field
-                  label="Aadhaar Number"
-                  name="aadhaar"
-                  value={form.aadhaar}
-                  onChange={handleChange}
-                  onBlur={handleBlur}
-                  placeholder="XXXX XXXX XXXX"
-                  error={errors.aadhaar}
-                  hint="12-digit Aadhaar — stored securely"
-                  success={
-                    !errors.aadhaar &&
-                    form.aadhaar.replace(/\s/g, "").length === 12
-                  }
-                  icon={
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={1.8}
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z"
-                      />
-                    </svg>
-                  }
-                />
-              </div>
-            </div>
-          </div>
-
-          <Divider />
-
-          {/* ── Fee & Seat Section ── */}
-          <div className="px-5 py-5 sm:px-6 sm:py-6">
-            <SectionHeading icon={FeeIcon} title="Fee & Seat Details" />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-5">
-              <div>
-                <Field
-                  label="Monthly Fee (₹)"
-                  name="feeAmount"
-                  value={form.feeAmount}
-                  onChange={handleChange}
-                  placeholder="e.g. 800"
-                  type="number"
-                  error={errors.feeAmount}
-                  icon={
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={1.8}
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M15 8.25H9m6 3H9m3 6l-3-3h1.5a3 3 0 100-6M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                      />
-                    </svg>
-                  }
-                />
-                {/* Fee quick-select chips */}
-                <div className="flex gap-2 mt-2 flex-wrap">
-                  {[500, 700, 800, 1000, 1200].map((amt) => (
-                    <button
-                      key={amt}
-                      type="button"
-                      onClick={() =>
-                        setForm((prev) => ({ ...prev, feeAmount: String(amt) }))
-                      }
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all duration-150 ${
-                        form.feeAmount === String(amt)
-                          ? "bg-indigo-600 text-white"
-                          : "bg-slate-100 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600"
-                      }`}
-                    >
-                      ₹{amt}
-                    </button>
-                  ))}
+                </div>
+                <div>
+                  <p className="as-section-title">Personal Info</p>
+                  <p className="as-section-sub">Student ki basic details</p>
                 </div>
               </div>
-              <Field
-                label="Seat Number (1–30)"
-                name="seatNumber"
-                value={form.seatNumber}
-                onChange={handleChange}
-                placeholder="e.g. 5"
-                type="number"
-                required
-                error={errors.seatNumber}
-                icon={
+              <div className="as-grid">
+                <Field
+                  label="Student ka Naam"
+                  name="name"
+                  value={form.name}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  placeholder="jaise Rahul Kumar"
+                  required
+                  error={errors.name}
+                  icon={
+                    <svg
+                      width="15"
+                      height="15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.9"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0"
+                      />
+                    </svg>
+                  }
+                />
+                <Field
+                  label="Phone Number"
+                  name="phone"
+                  value={form.phone}
+                  type="tel"
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  placeholder="jaise 9876543210"
+                  required
+                  error={errors.phone}
+                  valid={
+                    !errors.phone &&
+                    form.phone.length === 10 &&
+                    /^[6-9]\d{9}$/.test(form.phone)
+                  }
+                  icon={
+                    <svg
+                      width="15"
+                      height="15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.9"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"
+                      />
+                    </svg>
+                  }
+                />
+                <div className="as-col-full">
+                  <Field
+                    label="Aadhaar Number"
+                    name="aadhaar"
+                    value={form.aadhaar}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    placeholder="XXXX XXXX XXXX"
+                    error={errors.aadhaar}
+                    hint="12-digit Aadhaar — securely store hoga"
+                    valid={
+                      !errors.aadhaar &&
+                      form.aadhaar.replace(/\s/g, "").length === 12
+                    }
+                    icon={
+                      <svg
+                        width="15"
+                        height="15"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.9"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z"
+                        />
+                      </svg>
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="as-divider" />
+
+            {/* Fee & Seat */}
+            <div className="as-section" style={{ animationDelay: "0.1s" }}>
+              <div className="as-section-heading">
+                <div className="as-section-icon">
                   <svg
-                    className="w-4 h-4"
+                    width="16"
+                    height="16"
                     fill="none"
                     stroke="currentColor"
-                    strokeWidth={1.8}
+                    strokeWidth="1.9"
                     viewBox="0 0 24 24"
                   >
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"
+                      d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z"
                     />
                   </svg>
-                }
-              />
-              <Field
-                label="Start Date"
-                name="startDate"
-                value={form.startDate}
-                onChange={handleChange}
-                type="date"
-                icon={
+                </div>
+                <div>
+                  <p className="as-section-title">Fee aur Seat</p>
+                </div>
+              </div>
+              <div className="as-grid">
+                <div>
+                  <Field
+                    label="Monthly Fee (₹)"
+                    name="feeAmount"
+                    value={form.feeAmount}
+                    type="number"
+                    onChange={handleChange}
+                    placeholder="jaise 800"
+                    error={errors.feeAmount}
+                    icon={
+                      <svg
+                        width="15"
+                        height="15"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.9"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M15 8.25H9m6 3H9m3 6l-3-3h1.5a3 3 0 100-6M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      </svg>
+                    }
+                  />
+                  <div className="as-chips">
+                    {[500, 700, 800, 1000, 1200].map((amt) => (
+                      <button
+                        key={amt}
+                        type="button"
+                        className={`as-chip${form.feeAmount === String(amt) ? " active" : ""}`}
+                        onClick={() =>
+                          setForm((prev) => ({
+                            ...prev,
+                            feeAmount: String(amt),
+                          }))
+                        }
+                      >
+                        ₹{amt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <Field
+                  label="Seat Number (1–30)"
+                  name="seatNumber"
+                  value={form.seatNumber}
+                  type="number"
+                  onChange={handleChange}
+                  placeholder="jaise 5"
+                  required
+                  error={errors.seatNumber}
+                  icon={
+                    <svg
+                      width="15"
+                      height="15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.9"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"
+                      />
+                    </svg>
+                  }
+                />
+                <Field
+                  label="Start Date"
+                  name="startDate"
+                  value={form.startDate}
+                  type="date"
+                  onChange={handleChange}
+                  icon={
+                    <svg
+                      width="15"
+                      height="15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.9"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75"
+                      />
+                    </svg>
+                  }
+                />
+                <Field
+                  label="End Date"
+                  name="endDate"
+                  value={form.endDate}
+                  type="date"
+                  onChange={handleChange}
+                  error={errors.endDate}
+                  hint="Start date se +1 month auto-set"
+                  icon={
+                    <svg
+                      width="15"
+                      height="15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.9"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="as-divider" />
+
+            {/* Shift */}
+            <div className="as-section" style={{ animationDelay: "0.15s" }}>
+              <div className="as-section-heading">
+                <div className="as-section-icon">
                   <svg
-                    className="w-4 h-4"
+                    width="16"
+                    height="16"
                     fill="none"
                     stroke="currentColor"
-                    strokeWidth={1.8}
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
-                    />
-                  </svg>
-                }
-              />
-              <Field
-                label="End Date (Subscription)"
-                name="endDate"
-                value={form.endDate}
-                onChange={handleChange}
-                type="date"
-                error={errors.endDate}
-                hint="Auto-set to +1 month from start"
-                icon={
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.8}
+                    strokeWidth="1.9"
                     viewBox="0 0 24 24"
                   >
                     <path
@@ -612,189 +928,180 @@ export default function AddStudent() {
                       d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
                     />
                   </svg>
-                }
-              />
-            </div>
-          </div>
-
-          <Divider />
-
-          {/* ── Shift Section ── */}
-          <div className="px-5 py-5 sm:px-6 sm:py-6">
-            <SectionHeading icon={ShiftIcon} title="Select Shift" />
-            {errors.shift && (
-              <p className="mt-1 text-xs text-red-500">{errors.shift}</p>
-            )}
-            <div className="mt-4">
+                </div>
+                <div>
+                  <p className="as-section-title">Shift chunein</p>
+                </div>
+              </div>
+              {errors.shift && (
+                <p className="as-error-msg" style={{ marginBottom: 8 }}>
+                  {errors.shift}
+                </p>
+              )}
               <ShiftSelector
                 value={form.shift}
                 onChange={(val) => setForm({ ...form, shift: val })}
               />
             </div>
-          </div>
 
-          <Divider />
+            <div className="as-divider" />
 
-          {/* ── Seat Layout Section ── */}
-          <div className="px-5 py-5 sm:px-6 sm:py-6">
-            <SectionHeading
-              icon={SeatIcon}
-              title="Seat Layout"
-              subtitle="Tap a green seat to select"
-            />
-            <div className="mt-4 bg-slate-50 rounded-xl p-4 border border-slate-100">
-              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                <div className="flex items-center gap-4 flex-wrap">
-                  <LegendDot color="bg-emerald-500" label="Available" />
-                  <LegendDot color="bg-red-400" label="Occupied" />
-                  <LegendDot color="bg-indigo-500" label="Selected" />
-                </div>
-                <span className="text-xs font-medium text-slate-500">
-                  {30 - occupiedSeats.length} seats available
-                </span>
-              </div>
-              <SeatLayout
-                totalSeats={30}
-                occupiedSeats={occupiedSeats}
-                selectedSeat={Number(form.seatNumber)}
-                onSelect={(seat) => {
-                  setForm((prev) => ({ ...prev, seatNumber: String(seat) }));
-                  setErrors((prev) => ({ ...prev, seatNumber: "" }));
-                }}
-              />
-            </div>
-          </div>
-
-          {/* ── QR Info Banner ── */}
-          <div className="mx-5 mb-5 sm:mx-6 sm:mb-6 bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
-              <svg
-                className="w-4 h-4 text-indigo-600"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.8}
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z"
-                />
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75zM13.5 19.5h.75v.75h-.75v-.75zM19.5 13.5h.75v.75h-.75v-.75zM19.5 19.5h.75v.75h-.75v-.75zM16.5 16.5h.75v.75h-.75v-.75z"
-                />
-              </svg>
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-indigo-700">
-                QR Code auto-generated on save
-              </p>
-              <p className="text-xs text-indigo-500 mt-0.5">
-                A unique QR code will be created and stored — use it in the
-                Attendance scanner.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Submit Buttons */}
-        <div className="mt-6 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center sm:justify-end">
-          <button
-            type="button"
-            onClick={() => {
-              setForm({
-                name: "",
-                phone: "",
-                aadhaar: "",
-                shift: "morning",
-                seatNumber: "",
-                feeAmount: "",
-                startDate: today(),
-                endDate: oneMonthLater(),
-              });
-              setPhotoFile(null);
-              setPhotoPreview(null);
-              setErrors({});
-            }}
-            className="order-2 sm:order-1 px-5 py-3 rounded-xl text-sm font-semibold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 active:scale-[0.98] transition-all duration-150"
-          >
-            Clear Form
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={loading}
-            className="order-1 sm:order-2 flex items-center justify-center gap-2.5 px-7 py-3 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed active:scale-[0.98] shadow-sm transition-all duration-150"
-          >
-            {loading ? (
-              <>
-                <svg
-                  className="w-4 h-4 animate-spin"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
+            {/* Seat Layout */}
+            <div className="as-section" style={{ animationDelay: "0.2s" }}>
+              <div className="as-section-heading">
+                <div className="as-section-icon">
+                  <svg
+                    width="16"
+                    height="16"
+                    fill="none"
                     stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                  />
-                </svg>
-                Saving...
-              </>
-            ) : (
-              <>
+                    strokeWidth="1.9"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"
+                    />
+                  </svg>
+                </div>
+                <div>
+                  <p className="as-section-title">Seat Layout</p>
+                  <p className="as-section-sub">
+                    Green seat tap karke select karo
+                  </p>
+                </div>
+              </div>
+              <div className="as-seat-box">
+                <div className="as-legend">
+                  <div className="as-legend-items">
+                    <span className="as-legend-dot">
+                      <span className="as-dot as-dot-green" />
+                      Available
+                    </span>
+                    <span className="as-legend-dot">
+                      <span className="as-dot as-dot-red" />
+                      Occupied
+                    </span>
+                    <span className="as-legend-dot">
+                      <span className="as-dot as-dot-indigo" />
+                      Selected
+                    </span>
+                  </div>
+                  <span className="as-seat-count">
+                    {30 - occupiedSeats.length} seats free
+                  </span>
+                </div>
+                <SeatLayout
+                  totalSeats={30}
+                  occupiedSeats={occupiedSeats}
+                  selectedSeat={Number(form.seatNumber)}
+                  onSelect={(seat) => {
+                    setForm((prev) => ({ ...prev, seatNumber: String(seat) }));
+                    setErrors((prev) => ({ ...prev, seatNumber: "" }));
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* QR Info */}
+            <div className="as-qr-info">
+              <div className="as-qr-icon">
                 <svg
-                  className="w-4 h-4"
+                  width="18"
+                  height="18"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth={2.2}
+                  strokeWidth="1.8"
                   viewBox="0 0 24 24"
                 >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    d="M9 3.75H6.912a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859M12 3v8.25m0 0l-3-3m3 3l3-3"
+                    d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z"
                   />
                 </svg>
-                Save Student
-              </>
-            )}
-          </button>
+              </div>
+              <div>
+                <p className="as-qr-title">
+                  QR Code auto-generate hoga save karte waqt
+                </p>
+                <p className="as-qr-sub">
+                  Unique QR code create hokar store ho jaega — Attendance
+                  scanner mein use karo.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="as-actions">
+            <button
+              type="button"
+              className="as-btn as-btn-ghost"
+              onClick={handleClear}
+            >
+              Form Clear Karo
+            </button>
+            <button
+              type="button"
+              className="as-btn as-btn-primary"
+              onClick={handleSubmit}
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <span className="as-spin">
+                    <svg width="16" height="16" fill="none" viewBox="0 0 24 24">
+                      <circle
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                        style={{ opacity: 0.25 }}
+                      />
+                      <path
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                        style={{ opacity: 0.75 }}
+                      />
+                    </svg>
+                  </span>
+                  Save ho raha hai...
+                </>
+              ) : (
+                <>
+                  <svg
+                    width="16"
+                    height="16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9 3.75H6.912a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859M12 3v8.25m0 0l-3-3m3 3l3-3"
+                    />
+                  </svg>
+                  Student Save Karo
+                </>
+              )}
+            </button>
+          </div>
+
+          <p className="as-footer-note">
+            <span>*</span> wale fields zaruri hain
+          </p>
         </div>
-
-        <p className="text-center text-xs text-slate-400 mt-6 pb-4">
-          All fields marked with <span className="text-red-400">*</span> are
-          required
-        </p>
       </div>
-
-      <style>{`
-        @keyframes fade-in-down {
-          from { opacity: 0; transform: translateY(-10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes slide-in {
-          from { opacity: 0; transform: translateX(-8px); }
-          to { opacity: 1; transform: translateX(0); }
-        }
-        .animate-fade-in-down { animation: fade-in-down 0.4s ease both; }
-        .animate-slide-in { animation: slide-in 0.3s ease both; }
-      `}</style>
-    </div>
+    </>
   );
 }
 
-/* ─── Field ─────────────────────────────────────────────── */
+/* ── Field Component ── */
 function Field({
   label,
   name,
@@ -806,21 +1113,17 @@ function Field({
   required,
   error,
   hint,
-  success,
+  valid,
   icon,
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-xs font-semibold text-slate-600 tracking-wide uppercase">
+    <div className="as-field">
+      <label className="as-label">
         {label}
-        {required && <span className="text-red-400 ml-0.5">*</span>}
+        {required && <span className="as-label-req">*</span>}
       </label>
-      <div className="relative">
-        {icon && (
-          <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-            {icon}
-          </div>
-        )}
+      <div className="as-input-wrap">
+        {icon && <span className="as-input-icon">{icon}</span>}
         <input
           type={type}
           name={name}
@@ -829,26 +1132,16 @@ function Field({
           onBlur={onBlur}
           placeholder={placeholder}
           min={type === "number" ? 0 : undefined}
-          className={`
-            w-full rounded-xl border bg-white text-slate-800 text-sm placeholder:text-slate-400
-            transition-all duration-150 outline-none
-            ${icon ? "pl-9 pr-8 py-2.5" : "px-3.5 py-2.5"}
-            ${
-              error
-                ? "border-red-300 focus:border-red-400 focus:ring-2 focus:ring-red-100"
-                : success
-                  ? "border-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-50"
-                  : "border-slate-200 hover:border-slate-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50"
-            }
-          `}
+          className={`as-input${!icon ? " no-icon" : ""}${error ? " error" : ""}${valid && !error ? " valid" : ""}`}
         />
-        {success && !error && (
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500">
+        {valid && !error && (
+          <span className="as-input-tick">
             <svg
-              className="w-4 h-4"
+              width="15"
+              height="15"
               fill="none"
               stroke="currentColor"
-              strokeWidth={2.5}
+              strokeWidth="2.5"
               viewBox="0 0 24 24"
             >
               <path
@@ -857,16 +1150,12 @@ function Field({
                 d="M4.5 12.75l6 6 9-13.5"
               />
             </svg>
-          </div>
+          </span>
         )}
       </div>
       {error && (
-        <p className="flex items-center gap-1 text-xs text-red-500">
-          <svg
-            className="w-3 h-3 flex-shrink-0"
-            fill="currentColor"
-            viewBox="0 0 20 20"
-          >
+        <p className="as-error-msg">
+          <svg width="11" height="11" fill="currentColor" viewBox="0 0 20 20">
             <path
               fillRule="evenodd"
               d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
@@ -876,128 +1165,7 @@ function Field({
           {error}
         </p>
       )}
-      {hint && !error && <p className="text-xs text-slate-400">{hint}</p>}
+      {hint && !error && <p className="as-hint">{hint}</p>}
     </div>
-  );
-}
-
-function SectionHeading({ icon: Icon, title, subtitle }) {
-  return (
-    <div className="flex items-start gap-3">
-      <div className="mt-0.5 w-7 h-7 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 flex-shrink-0">
-        <Icon />
-      </div>
-      <div>
-        <h2 className="text-sm font-bold text-slate-800">{title}</h2>
-        {subtitle && (
-          <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Divider() {
-  return <div className="h-px bg-slate-100 mx-5 sm:mx-6" />;
-}
-
-function LegendDot({ color, label }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <div className={`w-3 h-3 rounded-sm ${color}`} />
-      <span className="text-xs text-slate-500">{label}</span>
-    </div>
-  );
-}
-
-/* ─── Icons ──────────────────────────────────────────────── */
-function CameraIcon() {
-  return (
-    <svg
-      className="w-4 h-4"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      viewBox="0 0 24 24"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"
-      />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"
-      />
-    </svg>
-  );
-}
-function PersonIcon() {
-  return (
-    <svg
-      className="w-4 h-4"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      viewBox="0 0 24 24"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
-      />
-    </svg>
-  );
-}
-function FeeIcon() {
-  return (
-    <svg
-      className="w-4 h-4"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      viewBox="0 0 24 24"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z"
-      />
-    </svg>
-  );
-}
-function ShiftIcon() {
-  return (
-    <svg
-      className="w-4 h-4"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      viewBox="0 0 24 24"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
-      />
-    </svg>
-  );
-}
-function SeatIcon() {
-  return (
-    <svg
-      className="w-4 h-4"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      viewBox="0 0 24 24"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"
-      />
-    </svg>
   );
 }

@@ -15,21 +15,26 @@ const SHIFT_CONFIG = {
   morning: {
     label: "Morning",
     badge: "bg-amber-100 text-amber-800",
-    dot: "bg-amber-400",
+    bg: "#fef3c7",
+    text: "#92400e",
+    dot: "#f59e0b",
   },
   evening: {
     label: "Evening",
     badge: "bg-sky-100 text-sky-800",
-    dot: "bg-sky-400",
+    bg: "#dbeafe",
+    text: "#1e40af",
+    dot: "#3b82f6",
   },
   fullday: {
     label: "Full Day",
     badge: "bg-violet-100 text-violet-800",
-    dot: "bg-violet-400",
+    bg: "#ede9fe",
+    text: "#5b21b6",
+    dot: "#8b5cf6",
   },
 };
 
-// ─── Helpers ───────────────────────────────────────────────
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -41,8 +46,7 @@ function formatTime(ts) {
 }
 function formatDate(iso) {
   if (!iso) return "";
-  const d = new Date(iso);
-  return d.toLocaleDateString("en-IN", {
+  return new Date(iso).toLocaleDateString("en-IN", {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -50,57 +54,65 @@ function formatDate(iso) {
 }
 
 export default function Attendance() {
-  // ── State ──
-  const [activeTab, setActiveTab] = useState("scanner"); // scanner | manual | history | absent
+  const [activeTab, setActiveTab] = useState("scanner");
   const [scanning, setScanning] = useState(false);
   const [lastScanned, setLastScanned] = useState(null);
-  const [message, setMessage] = useState(null); // { type: success|warn|error, text }
+  const [message, setMessage] = useState(null);
   const [todayAttendance, setTodayAttendance] = useState([]);
   const [allStudents, setAllStudents] = useState([]);
   const [historyDate, setHistoryDate] = useState(todayISO());
   const [historyList, setHistoryList] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [manualSearch, setManualSearch] = useState("");
-  const [manualMarking, setManualMarking] = useState(null); // studentId being marked
+  const [manualMarking, setManualMarking] = useState(null);
   const [pageLoading, setPageLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
   const qrRef = useRef(null);
+  const allStudentsRef = useRef([]); // ← FIX: stale closure se bachne ke liye
   const scannerDivId = "qr-reader";
 
-  // ── Init ──
   useEffect(() => {
     const init = async () => {
       setPageLoading(true);
       await Promise.all([fetchTodayAttendance(), fetchAllStudents()]);
       setPageLoading(false);
+      setTimeout(() => setMounted(true), 60);
     };
     init();
   }, []);
 
-  // Auto-refresh history when date changes
   useEffect(() => {
     if (activeTab === "history") fetchHistoryForDate(historyDate);
   }, [historyDate, activeTab]);
 
-  // Stop scanner when switching tabs
   useEffect(() => {
     if (activeTab !== "scanner" && scanning) stopScanner();
   }, [activeTab]);
 
-  // ── Firebase ──
+  // Auto-dismiss toast
+  useEffect(() => {
+    if (message) {
+      const t = setTimeout(() => setMessage(null), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [message]);
+
   const fetchAllStudents = async () => {
     const snap = await getDocs(collection(db, "students"));
-    setAllStudents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    setAllStudents(data);
+    allStudentsRef.current = data; // ← FIX: ref bhi update karo
   };
 
   const fetchTodayAttendance = async () => {
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
+    const s = new Date();
+    s.setHours(0, 0, 0, 0);
+    const e = new Date();
+    e.setHours(23, 59, 59, 999);
     const q = query(
       collection(db, "attendance"),
-      where("timestamp", ">=", Timestamp.fromDate(startOfDay)),
-      where("timestamp", "<=", Timestamp.fromDate(endOfDay)),
+      where("timestamp", ">=", Timestamp.fromDate(s)),
+      where("timestamp", "<=", Timestamp.fromDate(e)),
     );
     const snap = await getDocs(q);
     setTodayAttendance(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -151,19 +163,15 @@ export default function Attendance() {
       setLastScanned(student);
       setMessage({
         type: "success",
-        text: `Attendance marked for ${student.name}!`,
+        text: `✓ Attendance marked for ${student.name}`,
       });
       await fetchTodayAttendance();
     } catch (err) {
-      setMessage({
-        type: "error",
-        text: "Error marking attendance: " + err.message,
-      });
+      setMessage({ type: "error", text: "Error: " + err.message });
     }
     setManualMarking(null);
   };
 
-  // ── QR Scanner ──
   const startScanner = async () => {
     setScanning(true);
     setMessage(null);
@@ -197,18 +205,17 @@ export default function Attendance() {
 
   const onScanSuccess = async (studentId) => {
     await stopScanner();
-    const student = allStudents.find((s) => s.id === studentId);
+    const student = allStudentsRef.current.find((s) => s.id === studentId); // ← FIX: ref use karo
     if (!student) {
       setMessage({
         type: "error",
-        text: "Student not found! Invalid QR code.",
+        text: "Invalid QR code — student not found.",
       });
       return;
     }
     await markAttendance(student);
   };
 
-  // ── Derived ──
   const markedIds = new Set(todayAttendance.map((a) => a.studentId));
   const absentStudents = allStudents.filter((s) => !markedIds.has(s.id));
   const filteredStudents = allStudents.filter(
@@ -219,115 +226,315 @@ export default function Attendance() {
   );
 
   const TABS = [
-    {
-      id: "scanner",
-      label: "Scanner",
-      icon: (
-        <svg
-          className="w-4 h-4"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z"
-          />
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75zM13.5 19.5h.75v.75h-.75v-.75zM19.5 13.5h.75v.75h-.75v-.75zM19.5 19.5h.75v.75h-.75v-.75zM16.5 16.5h.75v.75h-.75v-.75z"
-          />
-        </svg>
-      ),
-    },
-    {
-      id: "manual",
-      label: "Manual",
-      icon: (
-        <svg
-          className="w-4 h-4"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
-          />
-        </svg>
-      ),
-    },
-    {
-      id: "absent",
-      label: "Absent",
-      icon: (
-        <svg
-          className="w-4 h-4"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
-          />
-        </svg>
-      ),
-      badge: absentStudents.length,
-    },
-    {
-      id: "history",
-      label: "History",
-      icon: (
-        <svg
-          className="w-4 h-4"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
-          />
-        </svg>
-      ),
-    },
+    { id: "scanner", label: "Scanner", icon: "⬛" },
+    { id: "manual", label: "Manual", icon: "👤" },
+    { id: "absent", label: "Absent", icon: "🚫", badge: absentStudents.length },
+    { id: "history", label: "History", icon: "🕐" },
   ];
 
   if (pageLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 rounded-full border-4 border-indigo-200 border-t-indigo-600 animate-spin" />
-          <p className="text-sm text-slate-500 font-medium">
-            Loading attendance...
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "#f0f2f8",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 14,
+          }}
+        >
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: "50%",
+              border: "4px solid #e0e7ff",
+              borderTopColor: "#6366f1",
+              animation: "spin 0.8s linear infinite",
+            }}
+          />
+          <p
+            style={{
+              fontSize: 14,
+              color: "#9ca3af",
+              fontFamily: "Inter, sans-serif",
+            }}
+          >
+            Loading attendance…
           </p>
         </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="max-w-4xl mx-auto px-4 py-6 sm:px-6">
-        {/* ── Header ── */}
-        <div className="mb-6">
-          <h1 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
-            <span className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center flex-shrink-0">
+    <>
+      <style>{`
+        .att-page {
+          min-height: 100vh;
+          background: #f0f2f8;
+          padding: 28px 16px 56px;
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+          opacity: 0; transform: translateY(14px);
+          transition: opacity 0.45s ease, transform 0.45s ease;
+        }
+        .att-page.mounted { opacity: 1; transform: translateY(0); }
+        .att-wrap { max-width: 960px; margin: 0 auto; }
+
+        /* Header */
+        .att-header { display: flex; align-items: center; gap: 13px; margin-bottom: 22px; }
+        .att-header-icon {
+          width: 44px; height: 44px; border-radius: 14px;
+          background: linear-gradient(135deg, #6366f1, #818cf8);
+          display: flex; align-items: center; justify-content: center;
+          box-shadow: 0 4px 14px rgba(99,102,241,0.3); flex-shrink: 0;
+        }
+        .att-title { font-size: 22px; font-weight: 800; color: #1e1b4b; margin: 0 0 2px; letter-spacing: -0.4px; }
+        .att-date { font-size: 13px; color: #6b7280; }
+
+        /* Summary */
+        .att-summary {
+          display: grid; grid-template-columns: repeat(3, 1fr);
+          gap: 12px; margin-bottom: 22px;
+        }
+        .att-mini {
+          background: #fff; border: 1.5px solid #e5e7eb; border-radius: 16px;
+          padding: 16px 12px; display: flex; flex-direction: column; align-items: center;
+          transition: transform 0.2s ease;
+          animation: fadeUp 0.4s cubic-bezier(.22,1,.36,1) both;
+        }
+        .att-mini:hover { transform: translateY(-2px); }
+        .att-mini-val { font-size: 28px; font-weight: 800; line-height: 1; }
+        .att-mini-lbl { font-size: 11px; color: #9ca3af; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+
+        /* Tabs */
+        .att-tabs {
+          display: flex; gap: 4px;
+          background: #fff; border: 1.5px solid #e5e7eb; border-radius: 16px;
+          padding: 5px; margin-bottom: 20px;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+        }
+        .att-tab {
+          flex: 1; display: flex; align-items: center; justify-content: center;
+          gap: 6px; padding: 9px 8px; border-radius: 11px;
+          font-size: 13px; font-weight: 700; cursor: pointer; border: none;
+          transition: all 0.2s cubic-bezier(.22,1,.36,1);
+          font-family: inherit; color: #6b7280; background: transparent;
+          position: relative;
+        }
+        .att-tab.active {
+          background: linear-gradient(135deg, #6366f1, #818cf8);
+          color: #fff;
+          box-shadow: 0 3px 10px rgba(99,102,241,0.3);
+        }
+        .att-tab:not(.active):hover { background: #f8fafc; color: #6366f1; }
+        .att-tab-badge {
+          font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 6px;
+        }
+        .att-tab.active .att-tab-badge { background: rgba(255,255,255,0.25); color: #fff; }
+        .att-tab:not(.active) .att-tab-badge { background: #fee2e2; color: #ef4444; }
+
+        /* Toast */
+        .att-toast {
+          display: flex; align-items: flex-start; gap: 12px;
+          padding: 14px 16px; border-radius: 14px;
+          margin-bottom: 18px; border: 1.5px solid;
+          font-size: 14px; font-weight: 600;
+          animation: slideIn 0.3s cubic-bezier(.22,1,.36,1);
+        }
+        .att-toast.success { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+        .att-toast.warn { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+        .att-toast.error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+        .att-toast-close { margin-left: auto; cursor: pointer; opacity: 0.5; transition: opacity 0.15s; background: none; border: none; color: inherit; display: flex; }
+        .att-toast-close:hover { opacity: 1; }
+
+        /* Panel */
+        .att-panel { animation: fadeUp 0.3s cubic-bezier(.22,1,.36,1); }
+
+        /* Cards */
+        .att-card {
+          background: #fff; border: 1.5px solid #e5e7eb;
+          border-radius: 20px; overflow: hidden;
+          box-shadow: 0 2px 16px rgba(0,0,0,0.04);
+        }
+        .att-card-head {
+          padding: 18px 20px; border-bottom: 1.5px solid #f1f3f9;
+          display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+        }
+        .att-card-title { font-size: 14px; font-weight: 800; color: #1e1b4b; margin: 0 0 2px; }
+        .att-card-sub { font-size: 12px; color: #9ca3af; margin: 0; }
+        .att-card-body { padding: 16px 20px; }
+
+        /* Scanner */
+        .att-scanner-area {
+          background: #0f0f1a; border-radius: 14px; overflow: hidden;
+          min-height: 260px; position: relative;
+        }
+        #qr-reader { width: 100% !important; }
+        #qr-reader video { width: 100% !important; }
+        .att-scanner-idle {
+          display: flex; flex-direction: column; align-items: center; justify-content: center;
+          gap: 12px; padding: 40px 20px; color: #4b5563;
+        }
+        .att-scanner-idle-icon {
+          width: 64px; height: 64px; border-radius: 18px;
+          background: rgba(99,102,241,0.12); display: flex; align-items: center; justify-content: center;
+          color: #6366f1;
+        }
+        .att-scan-pulse {
+          width: 64px; height: 64px; border-radius: 18px;
+          background: rgba(99,102,241,0.08);
+          display: flex; align-items: center; justify-content: center;
+          animation: pulse 2s ease-in-out infinite;
+          color: #6366f1;
+        }
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.08); opacity: 0.8; }
+        }
+
+        /* Buttons */
+        .att-btn {
+          display: flex; align-items: center; justify-content: center; gap: 8px;
+          padding: 12px 20px; border-radius: 13px;
+          font-size: 14px; font-weight: 700; cursor: pointer; border: none;
+          transition: all 0.18s ease; font-family: inherit; width: 100%;
+        }
+        .att-btn-primary {
+          background: linear-gradient(135deg, #6366f1, #818cf8);
+          color: #fff; box-shadow: 0 4px 14px rgba(99,102,241,0.3);
+        }
+        .att-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(99,102,241,0.4); }
+        .att-btn-danger {
+          background: linear-gradient(135deg, #ef4444, #f87171);
+          color: #fff; box-shadow: 0 4px 12px rgba(239,68,68,0.3);
+        }
+        .att-btn-danger:hover { transform: translateY(-1px); }
+        .att-btn:active { transform: scale(0.97) !important; }
+
+        /* Last scanned */
+        .att-last-scan {
+          margin-top: 14px; padding: 14px; background: #fafbff;
+          border: 1.5px solid #e0e7ff; border-radius: 14px;
+          animation: fadeUp 0.3s ease;
+        }
+        .att-last-label { font-size: 10px; font-weight: 800; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 10px; }
+
+        /* Today list */
+        .att-list { max-height: 460px; overflow-y: auto; space-y: 8px; }
+        .att-list-item {
+          display: flex; align-items: center; gap: 12px;
+          padding: 11px 14px; border-radius: 12px;
+          background: #fafbff; border: 1.5px solid #f1f3f9;
+          margin-bottom: 7px;
+          transition: all 0.18s ease;
+          animation: fadeUp 0.3s cubic-bezier(.22,1,.36,1) both;
+        }
+        .att-list-item:hover { border-color: #c7d2fe; background: #f5f7ff; }
+
+        /* Avatar */
+        .att-av {
+          width: 38px; height: 38px; border-radius: 11px;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 15px; font-weight: 800; flex-shrink: 0;
+        }
+        .att-av-marked { background: #d1fae5; color: #059669; }
+        .att-av-default { background: #eef2ff; color: #6366f1; }
+
+        /* Shift pill */
+        .att-pill { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
+        .att-time-badge {
+          flex-shrink: 0; font-size: 12px; font-weight: 700;
+          color: #6366f1; background: #eef2ff; border: 1px solid #c7d2fe;
+          padding: 4px 10px; border-radius: 9px;
+        }
+
+        /* Manual search */
+        .att-search-wrap { position: relative; margin-bottom: 12px; }
+        .att-search-icon {
+          position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+          color: #9ca3af; pointer-events: none; display: flex;
+        }
+        .att-search {
+          width: 100%; box-sizing: border-box;
+          padding: 10px 12px 10px 36px;
+          border: 1.5px solid #e5e7eb; border-radius: 12px;
+          font-size: 14px; color: #1e1b4b; background: #fafbff;
+          outline: none; font-family: inherit;
+          transition: border-color 0.18s, box-shadow 0.18s;
+        }
+        .att-search:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+
+        /* Mark button */
+        .att-mark-btn {
+          flex-shrink: 0; font-size: 12px; font-weight: 700;
+          color: #6366f1; background: #eef2ff; border: 1.5px solid #c7d2fe;
+          padding: 6px 14px; border-radius: 9px; cursor: pointer;
+          transition: all 0.15s ease; font-family: inherit;
+        }
+        .att-mark-btn:hover { background: #6366f1; color: #fff; border-color: #6366f1; }
+        .att-mark-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .att-marked-chip {
+          flex-shrink: 0; font-size: 12px; font-weight: 700;
+          color: #059669; background: #d1fae5; padding: 6px 12px; border-radius: 9px;
+          display: flex; align-items: center; gap: 4px;
+        }
+
+        /* Absent */
+        .att-absent-grid {
+          display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px;
+        }
+        .att-absent-item {
+          display: flex; align-items: center; gap: 12px;
+          padding: 12px 14px; border-radius: 14px;
+          background: #fef2f2; border: 1.5px solid #fecaca;
+          transition: all 0.18s ease;
+          animation: fadeUp 0.35s cubic-bezier(.22,1,.36,1) both;
+        }
+        .att-absent-item:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(239,68,68,0.1); }
+
+        /* Empty state */
+        .att-empty {
+          display: flex; flex-direction: column; align-items: center; gap: 12px;
+          padding: 56px 20px; color: #9ca3af;
+        }
+        .att-empty-icon {
+          width: 56px; height: 56px; border-radius: 18px;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 26px;
+        }
+
+        @keyframes fadeUp {
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes slideIn {
+          from { opacity: 0; transform: translateX(-10px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
+
+      <div className={`att-page${mounted ? " mounted" : ""}`}>
+        <div className="att-wrap">
+          {/* Header */}
+          <div className="att-header">
+            <div className="att-header-icon">
               <svg
-                className="w-4 h-4 text-white"
+                width="22"
+                height="22"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth={2.2}
+                strokeWidth="2.2"
                 viewBox="0 0 24 24"
               >
                 <path
@@ -336,605 +543,822 @@ export default function Attendance() {
                   d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
                 />
               </svg>
-            </span>
-            QR Attendance
-          </h1>
-          <p className="text-sm text-slate-500 mt-0.5 ml-10">
-            {new Date().toLocaleDateString("en-IN", {
-              weekday: "long",
-              day: "numeric",
-              month: "long",
-              year: "numeric",
-            })}
-          </p>
-        </div>
-
-        {/* ── Today's Summary Strip ── */}
-        <div className="grid grid-cols-3 gap-3 mb-6">
-          <MiniStat
-            label="Present"
-            value={todayAttendance.length}
-            color="text-emerald-600"
-            bg="bg-emerald-50 border-emerald-100"
-          />
-          <MiniStat
-            label="Absent"
-            value={absentStudents.length}
-            color="text-red-500"
-            bg="bg-red-50 border-red-100"
-          />
-          <MiniStat
-            label="Total"
-            value={allStudents.length}
-            color="text-indigo-600"
-            bg="bg-indigo-50 border-indigo-100"
-          />
-        </div>
-
-        {/* ── Tabs ── */}
-        <div className="flex gap-1 bg-white border border-slate-200 rounded-xl p-1 mb-5 shadow-sm">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`
-                flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold transition-all duration-150
-                ${
-                  activeTab === tab.id
-                    ? "bg-indigo-600 text-white shadow-sm"
-                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
-                }
-              `}
-            >
-              {tab.icon}
-              <span className="hidden sm:inline">{tab.label}</span>
-              {tab.badge > 0 && (
-                <span
-                  className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${activeTab === tab.id ? "bg-white/25 text-white" : "bg-red-100 text-red-600"}`}
-                >
-                  {tab.badge}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* ── Toast Message ── */}
-        {message && (
-          <div
-            className={`
-            mb-5 flex items-start gap-3 px-4 py-3.5 rounded-xl text-sm font-semibold border
-            ${
-              message.type === "success"
-                ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                : message.type === "warn"
-                  ? "bg-amber-50 border-amber-200 text-amber-800"
-                  : "bg-red-50 border-red-200 text-red-700"
-            }
-          `}
-          >
-            <span className="text-lg flex-shrink-0 mt-0.5">
-              {message.type === "success"
-                ? "✅"
-                : message.type === "warn"
-                  ? "⚠️"
-                  : "❌"}
-            </span>
-            <div className="flex-1">{message.text}</div>
-            <button
-              onClick={() => setMessage(null)}
-              className="text-current opacity-50 hover:opacity-100 flex-shrink-0"
-            >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          </div>
-        )}
-
-        {/* ═══════════════════════════════════════════ */}
-        {/* TAB: SCANNER                                */}
-        {/* ═══════════════════════════════════════════ */}
-        {activeTab === "scanner" && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            {/* Scanner Box */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100">
-                <h2 className="text-sm font-bold text-slate-800">
-                  Camera Scanner
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Point camera at student's QR code
-                </p>
-              </div>
-
-              {/* Camera area */}
-              <div className="p-4">
-                <div
-                  id={scannerDivId}
-                  className="w-full rounded-xl overflow-hidden bg-slate-900"
-                  style={{ minHeight: "260px" }}
-                />
-
-                {!scanning && !lastScanned && (
-                  <div className="mt-3 flex flex-col items-center gap-2 py-4 text-slate-400">
-                    <svg
-                      className="w-10 h-10 opacity-30"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={1.5}
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z"
-                      />
-                    </svg>
-                    <p className="text-xs">Camera preview will appear here</p>
-                  </div>
-                )}
-
-                <div className="mt-4 flex gap-2">
-                  {!scanning ? (
-                    <button
-                      onClick={startScanner}
-                      className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 active:scale-[0.98] transition-all"
-                    >
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"
-                        />
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z"
-                        />
-                      </svg>
-                      Start Scanner
-                    </button>
-                  ) : (
-                    <button
-                      onClick={stopScanner}
-                      className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 active:scale-[0.98] transition-all"
-                    >
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z"
-                        />
-                      </svg>
-                      Stop Scanner
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Last scanned card */}
-              {lastScanned && (
-                <div className="mx-4 mb-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
-                  <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-2">
-                    Last Scanned
-                  </p>
-                  <StudentMiniCard
-                    student={lastScanned}
-                    marked={markedIds.has(lastScanned.id)}
-                  />
-                </div>
-              )}
             </div>
-
-            {/* Today's attendance list */}
-            <TodayList attendance={todayAttendance} />
+            <div>
+              <h1 className="att-title">QR Attendance</h1>
+              <p className="att-date">
+                {new Date().toLocaleDateString("en-IN", {
+                  weekday: "long",
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                })}
+              </p>
+            </div>
           </div>
-        )}
 
-        {/* ═══════════════════════════════════════════ */}
-        {/* TAB: MANUAL                                 */}
-        {/* ═══════════════════════════════════════════ */}
-        {activeTab === "manual" && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100">
-                <h2 className="text-sm font-bold text-slate-800">
-                  Mark Manually
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Search by name, phone, or seat number
-                </p>
+          {/* Summary */}
+          <div className="att-summary">
+            {[
+              {
+                val: todayAttendance.length,
+                lbl: "Present",
+                color: "#10b981",
+                bg: "#ecfdf5",
+                delay: "0s",
+              },
+              {
+                val: absentStudents.length,
+                lbl: "Absent",
+                color: "#ef4444",
+                bg: "#fef2f2",
+                delay: "0.05s",
+              },
+              {
+                val: allStudents.length,
+                lbl: "Total",
+                color: "#6366f1",
+                bg: "#eef2ff",
+                delay: "0.1s",
+              },
+            ].map((s) => (
+              <div
+                className="att-mini"
+                key={s.lbl}
+                style={{
+                  animationDelay: s.delay,
+                  borderColor:
+                    s.bg === "#eef2ff"
+                      ? "#c7d2fe"
+                      : s.bg === "#ecfdf5"
+                        ? "#a7f3d0"
+                        : "#fecaca",
+                }}
+              >
+                <span className="att-mini-val" style={{ color: s.color }}>
+                  {s.val}
+                </span>
+                <span className="att-mini-lbl">{s.lbl}</span>
               </div>
-              <div className="p-4">
-                {/* Search */}
-                <div className="relative mb-3">
-                  <svg
-                    className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0016.803 15.803z"
-                    />
-                  </svg>
-                  <input
-                    type="text"
-                    value={manualSearch}
-                    onChange={(e) => setManualSearch(e.target.value)}
-                    placeholder="Search student..."
-                    className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300 text-slate-800 placeholder:text-slate-400"
-                  />
-                </div>
+            ))}
+          </div>
 
-                {/* Student list */}
-                <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
-                  {filteredStudents.length === 0 && (
-                    <p className="text-sm text-slate-400 text-center py-8">
-                      No students found
-                    </p>
-                  )}
-                  {filteredStudents.map((s) => {
-                    const isMarked = markedIds.has(s.id);
-                    const isLoading = manualMarking === s.id;
-                    return (
-                      <div
-                        key={s.id}
-                        className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${isMarked ? "bg-emerald-50 border-emerald-100" : "bg-slate-50 border-slate-100 hover:border-slate-200"}`}
+          {/* Tabs */}
+          <div className="att-tabs">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                className={`att-tab${activeTab === tab.id ? " active" : ""}`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                <span style={{ fontSize: 14 }}>{tab.icon}</span>
+                <span
+                  style={{
+                    display: window.innerWidth < 480 ? "none" : "inline",
+                  }}
+                >
+                  {tab.label}
+                </span>
+                {tab.badge > 0 && (
+                  <span className="att-tab-badge">{tab.badge}</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Toast */}
+          {message && (
+            <div className={`att-toast ${message.type}`}>
+              <span style={{ fontSize: 16, flexShrink: 0 }}>
+                {message.type === "success"
+                  ? "✅"
+                  : message.type === "warn"
+                    ? "⚠️"
+                    : "❌"}
+              </span>
+              <span style={{ flex: 1 }}>{message.text}</span>
+              <button
+                className="att-toast-close"
+                onClick={() => setMessage(null)}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
+          )}
+
+          {/* ─── SCANNER TAB ─── */}
+          {activeTab === "scanner" && (
+            <div
+              className="att-panel"
+              style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+                  gap: 16,
+                }}
+              >
+                {/* Scanner Card */}
+                <div className="att-card">
+                  <div className="att-card-head">
+                    <div>
+                      <p className="att-card-title">Camera Scanner</p>
+                      <p className="att-card-sub">
+                        Point camera at student's QR code
+                      </p>
+                    </div>
+                    {scanning && (
+                      <span
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: "#10b981",
+                          background: "#ecfdf5",
+                          padding: "4px 10px",
+                          borderRadius: 8,
+                        }}
                       >
-                        <Avatar name={s.name} marked={isMarked} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-slate-800 truncate">
-                            {s.name}
-                          </p>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <ShiftPill shift={s.shift} />
-                            <span className="text-xs text-slate-400">
-                              Seat {s.seatNumber}
-                            </span>
-                          </div>
-                        </div>
-                        {isMarked ? (
-                          <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600 bg-emerald-100 px-2.5 py-1 rounded-full flex-shrink-0">
+                        <span
+                          style={{
+                            width: 7,
+                            height: 7,
+                            borderRadius: "50%",
+                            background: "#10b981",
+                            animation: "pulse 1s infinite",
+                          }}
+                        />
+                        Live
+                      </span>
+                    )}
+                  </div>
+                  <div className="att-card-body">
+                    <div className="att-scanner-area">
+                      <div id={scannerDivId} />
+                      {!scanning && (
+                        <div className="att-scanner-idle">
+                          <div
+                            className={
+                              lastScanned
+                                ? "att-scanner-idle-icon"
+                                : "att-scan-pulse"
+                            }
+                          >
                             <svg
-                              className="w-3 h-3"
+                              width="28"
+                              height="28"
                               fill="none"
                               stroke="currentColor"
-                              strokeWidth={2.5}
+                              strokeWidth="1.8"
                               viewBox="0 0 24 24"
                             >
                               <path
                                 strokeLinecap="round"
                                 strokeLinejoin="round"
-                                d="M4.5 12.75l6 6 9-13.5"
+                                d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z"
                               />
                             </svg>
-                            Done
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => markAttendance(s)}
-                            disabled={isLoading}
-                            className="flex-shrink-0 flex items-center gap-1 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 px-3 py-1.5 rounded-full transition-all disabled:opacity-50"
+                          </div>
+                          <p
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 600,
+                              color: "#6b7280",
+                            }}
                           >
-                            {isLoading ? (
-                              <span className="w-3 h-3 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />
-                            ) : (
-                              <svg
-                                className="w-3 h-3"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth={2.5}
-                                viewBox="0 0 24 24"
+                            {lastScanned
+                              ? "Scanner stopped"
+                              : "Camera preview will appear here"}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ marginTop: 12 }}>
+                      {!scanning ? (
+                        <button
+                          className="att-btn att-btn-primary"
+                          onClick={startScanner}
+                        >
+                          <svg
+                            width="16"
+                            height="16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"
+                            />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"
+                            />
+                          </svg>
+                          Start Scanner
+                        </button>
+                      ) : (
+                        <button
+                          className="att-btn att-btn-danger"
+                          onClick={stopScanner}
+                        >
+                          <svg
+                            width="16"
+                            height="16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z"
+                            />
+                          </svg>
+                          Stop Scanner
+                        </button>
+                      )}
+                    </div>
+                    {lastScanned && (
+                      <div className="att-last-scan">
+                        <p className="att-last-label">Last Scanned</p>
+                        <AttStudentRow
+                          student={lastScanned}
+                          marked={markedIds.has(lastScanned.id)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {/* Today list */}
+                <TodayList attendance={todayAttendance} />
+              </div>
+            </div>
+          )}
+
+          {/* ─── MANUAL TAB ─── */}
+          {activeTab === "manual" && (
+            <div
+              className="att-panel"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+                gap: 16,
+              }}
+            >
+              <div className="att-card">
+                <div className="att-card-head">
+                  <div>
+                    <p className="att-card-title">Mark Manually</p>
+                    <p className="att-card-sub">
+                      Search by name, phone, or seat
+                    </p>
+                  </div>
+                </div>
+                <div className="att-card-body">
+                  <div className="att-search-wrap">
+                    <span className="att-search-icon">
+                      <svg
+                        width="15"
+                        height="15"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0016.803 15.803z"
+                        />
+                      </svg>
+                    </span>
+                    <input
+                      className="att-search"
+                      type="text"
+                      value={manualSearch}
+                      onChange={(e) => setManualSearch(e.target.value)}
+                      placeholder="Search student…"
+                    />
+                  </div>
+                  <div style={{ maxHeight: 420, overflowY: "auto" }}>
+                    {filteredStudents.length === 0 ? (
+                      <div className="att-empty">
+                        <div
+                          className="att-empty-icon"
+                          style={{ background: "#f1f3f9" }}
+                        >
+                          🔍
+                        </div>
+                        <p
+                          style={{
+                            fontSize: 14,
+                            fontWeight: 600,
+                            color: "#6b7280",
+                          }}
+                        >
+                          No students found
+                        </p>
+                      </div>
+                    ) : (
+                      filteredStudents.map((s, i) => {
+                        const isMarked = markedIds.has(s.id);
+                        const isLoading = manualMarking === s.id;
+                        const cfg = SHIFT_CONFIG[s.shift] || {};
+                        return (
+                          <div
+                            key={s.id}
+                            className="att-list-item"
+                            style={{
+                              animationDelay: `${Math.min(i * 0.03, 0.25)}s`,
+                              background: isMarked ? "#f0fdf4" : undefined,
+                              borderColor: isMarked ? "#bbf7d0" : undefined,
+                            }}
+                          >
+                            <div
+                              className={`att-av ${isMarked ? "att-av-marked" : "att-av-default"}`}
+                            >
+                              {s.name?.charAt(0)?.toUpperCase() || "?"}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <p
+                                style={{
+                                  fontSize: 14,
+                                  fontWeight: 700,
+                                  color: "#1e1b4b",
+                                  margin: "0 0 4px",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
                               >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  d="M4.5 12.75l6 6 9-13.5"
-                                />
-                              </svg>
+                                {s.name}
+                              </p>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: 6,
+                                  alignItems: "center",
+                                  flexWrap: "wrap",
+                                }}
+                              >
+                                {cfg.label && (
+                                  <span
+                                    className="att-pill"
+                                    style={{
+                                      background: cfg.bg,
+                                      color: cfg.text,
+                                    }}
+                                  >
+                                    {cfg.label}
+                                  </span>
+                                )}
+                                <span
+                                  style={{ fontSize: 11, color: "#9ca3af" }}
+                                >
+                                  Seat {s.seatNumber}
+                                </span>
+                              </div>
+                            </div>
+                            {isMarked ? (
+                              <span className="att-marked-chip">
+                                <svg
+                                  width="12"
+                                  height="12"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.5"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="M4.5 12.75l6 6 9-13.5"
+                                  />
+                                </svg>
+                                Done
+                              </span>
+                            ) : (
+                              <button
+                                className="att-mark-btn"
+                                onClick={() => markAttendance(s)}
+                                disabled={isLoading}
+                              >
+                                {isLoading ? (
+                                  <span
+                                    style={{
+                                      width: 12,
+                                      height: 12,
+                                      borderRadius: "50%",
+                                      border: "2px solid #c7d2fe",
+                                      borderTopColor: "#6366f1",
+                                      animation: "spin 0.7s linear infinite",
+                                      display: "inline-block",
+                                    }}
+                                  />
+                                ) : (
+                                  "Mark"
+                                )}
+                              </button>
                             )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
+              <TodayList attendance={todayAttendance} />
+            </div>
+          )}
+
+          {/* ─── ABSENT TAB ─── */}
+          {activeTab === "absent" && (
+            <div className="att-panel att-card">
+              <div className="att-card-head">
+                <div>
+                  <p className="att-card-title">Absent Today</p>
+                  <p className="att-card-sub">
+                    {absentStudents.length} students haven't marked attendance
+                  </p>
+                </div>
+                {absentStudents.length > 0 && (
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 800,
+                      background: "#fee2e2",
+                      color: "#ef4444",
+                      padding: "5px 12px",
+                      borderRadius: 9,
+                    }}
+                  >
+                    {absentStudents.length} absent
+                  </span>
+                )}
+              </div>
+              <div className="att-card-body">
+                {absentStudents.length === 0 ? (
+                  <div className="att-empty">
+                    <div
+                      className="att-empty-icon"
+                      style={{ background: "#ecfdf5" }}
+                    >
+                      🎉
+                    </div>
+                    <p
+                      style={{
+                        fontSize: 15,
+                        fontWeight: 700,
+                        color: "#065f46",
+                      }}
+                    >
+                      Full house today!
+                    </p>
+                    <p style={{ fontSize: 13 }}>
+                      All {allStudents.length} students have marked attendance.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="att-absent-grid">
+                    {absentStudents.map((s, i) => {
+                      const cfg = SHIFT_CONFIG[s.shift] || {};
+                      return (
+                        <div
+                          key={s.id}
+                          className="att-absent-item"
+                          style={{
+                            animationDelay: `${Math.min(i * 0.04, 0.3)}s`,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 38,
+                              height: 38,
+                              borderRadius: 11,
+                              background: "#fee2e2",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              color: "#ef4444",
+                              fontWeight: 800,
+                              fontSize: 15,
+                              flexShrink: 0,
+                            }}
+                          >
+                            {s.name?.charAt(0)?.toUpperCase() || "?"}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p
+                              style={{
+                                fontSize: 14,
+                                fontWeight: 700,
+                                color: "#1e1b4b",
+                                margin: "0 0 4px",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {s.name}
+                            </p>
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: 6,
+                                alignItems: "center",
+                              }}
+                            >
+                              {cfg.label && (
+                                <span
+                                  className="att-pill"
+                                  style={{
+                                    background: cfg.bg,
+                                    color: cfg.text,
+                                  }}
+                                >
+                                  {cfg.label}
+                                </span>
+                              )}
+                              <span style={{ fontSize: 11, color: "#9ca3af" }}>
+                                Seat {s.seatNumber}
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            className="att-mark-btn"
+                            onClick={() => {
+                              markAttendance(s);
+                              setActiveTab("manual");
+                            }}
+                          >
                             Mark
                           </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <TodayList attendance={todayAttendance} />
-          </div>
-        )}
-
-        {/* ═══════════════════════════════════════════ */}
-        {/* TAB: ABSENT                                 */}
-        {/* ═══════════════════════════════════════════ */}
-        {activeTab === "absent" && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-bold text-slate-800">
-                  Absent Today
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {absentStudents.length} students haven't marked attendance
-                </p>
-              </div>
-              {absentStudents.length > 0 && (
-                <span className="text-xs font-bold bg-red-100 text-red-600 px-2.5 py-1 rounded-full">
-                  {absentStudents.length} absent
-                </span>
-              )}
-            </div>
-            <div className="p-4">
-              {absentStudents.length === 0 ? (
-                <div className="flex flex-col items-center gap-3 py-14 text-slate-400">
-                  <div className="w-14 h-14 rounded-full bg-emerald-50 flex items-center justify-center">
-                    <svg
-                      className="w-7 h-7 text-emerald-500"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                      />
-                    </svg>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <p className="text-sm font-semibold text-slate-600">
-                    Full house today!
-                  </p>
-                  <p className="text-xs text-center">
-                    All {allStudents.length} students have marked attendance.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {absentStudents.map((s) => (
-                    <div
-                      key={s.id}
-                      className="flex items-center gap-3 p-3 rounded-xl bg-red-50 border border-red-100"
-                    >
-                      <div className="w-9 h-9 rounded-full bg-red-100 flex items-center justify-center text-red-500 font-bold text-sm flex-shrink-0">
-                        {s.name?.charAt(0)?.toUpperCase() || "?"}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-slate-800 truncate">
-                          {s.name}
-                        </p>
-                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                          <ShiftPill shift={s.shift} />
-                          <span className="text-xs text-slate-400">
-                            Seat {s.seatNumber}
-                          </span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          markAttendance(s);
-                          setActiveTab("manual");
-                        }}
-                        className="flex-shrink-0 text-xs font-semibold text-indigo-600 bg-white hover:bg-indigo-50 border border-indigo-100 px-2.5 py-1.5 rounded-full transition-all"
-                      >
-                        Mark
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ═══════════════════════════════════════════ */}
-        {/* TAB: HISTORY                                */}
-        {/* ═══════════════════════════════════════════ */}
-        {activeTab === "history" && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
-              <div>
-                <h2 className="text-sm font-bold text-slate-800">
-                  Attendance History
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {historyLoading
-                    ? "Loading..."
-                    : `${historyList.length} records on ${formatDate(historyDate)}`}
-                </p>
+                )}
               </div>
-              <input
-                type="date"
-                value={historyDate}
-                max={todayISO()}
-                onChange={(e) => setHistoryDate(e.target.value)}
-                className="text-sm px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300 text-slate-700"
-              />
             </div>
+          )}
 
-            <div className="p-4">
-              {historyLoading ? (
-                <div className="flex justify-center py-10">
-                  <div className="w-7 h-7 rounded-full border-4 border-indigo-200 border-t-indigo-600 animate-spin" />
-                </div>
-              ) : historyList.length === 0 ? (
-                <div className="flex flex-col items-center gap-2 py-12 text-slate-400">
-                  <svg
-                    className="w-10 h-10 opacity-40"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.5}
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
-                    />
-                  </svg>
-                  <p className="text-sm font-medium text-slate-500">
-                    No attendance on this date
+          {/* ─── HISTORY TAB ─── */}
+          {activeTab === "history" && (
+            <div className="att-panel att-card">
+              <div className="att-card-head">
+                <div>
+                  <p className="att-card-title">Attendance History</p>
+                  <p className="att-card-sub">
+                    {historyLoading
+                      ? "Loading…"
+                      : `${historyList.length} records on ${formatDate(historyDate)}`}
                   </p>
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  {historyList.map((a) => (
+                <input
+                  type="date"
+                  value={historyDate}
+                  max={todayISO()}
+                  onChange={(e) => setHistoryDate(e.target.value)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 11,
+                    border: "1.5px solid #e5e7eb",
+                    fontSize: 13,
+                    color: "#1e1b4b",
+                    background: "#fafbff",
+                    outline: "none",
+                    fontFamily: "Inter, sans-serif",
+                  }}
+                />
+              </div>
+              <div className="att-card-body">
+                {historyLoading ? (
+                  <div className="att-empty">
                     <div
-                      key={a.id}
-                      className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100"
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: "50%",
+                        border: "4px solid #e0e7ff",
+                        borderTopColor: "#6366f1",
+                        animation: "spin 0.8s linear infinite",
+                      }}
+                    />
+                  </div>
+                ) : historyList.length === 0 ? (
+                  <div className="att-empty">
+                    <div
+                      className="att-empty-icon"
+                      style={{ background: "#f1f3f9" }}
                     >
-                      <Avatar name={a.studentName} marked />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-slate-800 truncate">
-                          {a.studentName}
-                        </p>
-                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                          <ShiftPill shift={a.shift} />
-                          <span className="text-xs text-slate-400">
-                            Seat {a.seatNumber}
-                          </span>
+                      📅
+                    </div>
+                    <p
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 600,
+                        color: "#6b7280",
+                      }}
+                    >
+                      No attendance on this date
+                    </p>
+                  </div>
+                ) : (
+                  historyList.map((a, i) => {
+                    const cfg = SHIFT_CONFIG[a.shift] || {};
+                    return (
+                      <div
+                        key={a.id}
+                        className="att-list-item"
+                        style={{
+                          animationDelay: `${Math.min(i * 0.03, 0.25)}s`,
+                        }}
+                      >
+                        <div className="att-av att-av-marked">
+                          {a.studentName?.charAt(0)?.toUpperCase() || "?"}
                         </div>
-                      </div>
-                      <div className="flex-shrink-0 text-right">
-                        <span className="text-xs font-semibold text-slate-600 bg-white border border-slate-200 px-2.5 py-1 rounded-lg">
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p
+                            style={{
+                              fontSize: 14,
+                              fontWeight: 700,
+                              color: "#1e1b4b",
+                              margin: "0 0 4px",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {a.studentName}
+                          </p>
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 6,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            {cfg.label && (
+                              <span
+                                className="att-pill"
+                                style={{ background: cfg.bg, color: cfg.text }}
+                              >
+                                {cfg.label}
+                              </span>
+                            )}
+                            <span style={{ fontSize: 11, color: "#9ca3af" }}>
+                              Seat {a.seatNumber}
+                            </span>
+                          </div>
+                        </div>
+                        <span className="att-time-badge">
                           {formatTime(a.timestamp)}
                         </span>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                    );
+                  })
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
-/* ─── Sub-components ─────────────────────────────────────── */
+/* Sub-components */
 
 function TodayList({ attendance }) {
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-      <div className="px-5 py-4 border-b border-slate-100">
-        <h2 className="text-sm font-bold text-slate-800">Today's Attendance</h2>
-        <p className="text-xs text-slate-500 mt-0.5">
-          {attendance.length} marked so far
-        </p>
+    <div className="att-card">
+      <div className="att-card-head">
+        <div>
+          <p className="att-card-title">Today's Attendance</p>
+          <p className="att-card-sub">{attendance.length} marked so far</p>
+        </div>
       </div>
-      <div className="p-4 max-h-[460px] overflow-y-auto space-y-2">
+      <div className="att-card-body att-list">
         {attendance.length === 0 ? (
-          <p className="text-sm text-slate-400 text-center py-10">
-            No attendance marked yet today.
-          </p>
+          <div className="att-empty">
+            <div className="att-empty-icon" style={{ background: "#f1f3f9" }}>
+              📋
+            </div>
+            <p style={{ fontSize: 13, color: "#9ca3af" }}>
+              No attendance marked yet
+            </p>
+          </div>
         ) : (
-          [...attendance].reverse().map((a) => (
-            <div
-              key={a.id}
-              className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100"
-            >
-              <Avatar name={a.studentName} marked />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-slate-800 truncate">
-                  {a.studentName}
-                </p>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <ShiftPill shift={a.shift} />
-                  <span className="text-xs text-slate-400">
-                    Seat {a.seatNumber}
-                  </span>
+          [...attendance].reverse().map((a, i) => {
+            const cfg = SHIFT_CONFIG[a.shift] || {};
+            return (
+              <div
+                key={a.id}
+                className="att-list-item"
+                style={{ animationDelay: `${Math.min(i * 0.03, 0.25)}s` }}
+              >
+                <div className="att-av att-av-marked">
+                  {a.studentName?.charAt(0)?.toUpperCase() || "?"}
                 </div>
-              </div>
-              <span className="flex-shrink-0 text-xs font-semibold text-slate-500 bg-white border border-slate-200 px-2 py-1 rounded-lg">
-                {a.timestamp
-                  ?.toDate()
-                  .toLocaleTimeString("en-IN", {
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: "#1e1b4b",
+                      margin: "0 0 4px",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {a.studentName}
+                  </p>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {cfg.label && (
+                      <span
+                        className="att-pill"
+                        style={{ background: cfg.bg, color: cfg.text }}
+                      >
+                        {cfg.label}
+                      </span>
+                    )}
+                    <span style={{ fontSize: 11, color: "#9ca3af" }}>
+                      Seat {a.seatNumber}
+                    </span>
+                  </div>
+                </div>
+                <span className="att-time-badge">
+                  {a.timestamp?.toDate().toLocaleTimeString("en-IN", {
                     hour: "2-digit",
                     minute: "2-digit",
                   })}
-              </span>
-            </div>
-          ))
+                </span>
+              </div>
+            );
+          })
         )}
       </div>
     </div>
   );
 }
 
-function MiniStat({ label, value, color, bg }) {
+function AttStudentRow({ student, marked }) {
+  const cfg = SHIFT_CONFIG[student.shift] || {};
   return (
-    <div className={`flex flex-col items-center py-3 rounded-xl border ${bg}`}>
-      <span className={`text-2xl font-bold ${color}`}>{value}</span>
-      <span className="text-xs text-slate-500 font-medium mt-0.5">{label}</span>
-    </div>
-  );
-}
-
-function Avatar({ name, marked }) {
-  return (
-    <div
-      className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 ${marked ? "bg-emerald-100 text-emerald-700" : "bg-indigo-100 text-indigo-700"}`}
-    >
-      {name?.charAt(0)?.toUpperCase() || "?"}
-    </div>
-  );
-}
-
-function ShiftPill({ shift }) {
-  const cfg = SHIFT_CONFIG[shift];
-  if (!cfg) return <span className="text-xs text-slate-400">{shift}</span>;
-  return (
-    <span
-      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${cfg.badge}`}
-    >
-      {cfg.label}
-    </span>
-  );
-}
-
-function StudentMiniCard({ student, marked }) {
-  return (
-    <div className="flex items-center gap-3">
-      <Avatar name={student.name} marked={marked} />
+    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div className={`att-av ${marked ? "att-av-marked" : "att-av-default"}`}>
+        {student.name?.charAt(0)?.toUpperCase() || "?"}
+      </div>
       <div>
-        <p className="text-sm font-bold text-slate-800">{student.name}</p>
-        <div className="flex items-center gap-2 mt-0.5">
-          <ShiftPill shift={student.shift} />
-          <span className="text-xs text-slate-500">
+        <p
+          style={{
+            fontSize: 14,
+            fontWeight: 700,
+            color: "#1e1b4b",
+            margin: "0 0 4px",
+          }}
+        >
+          {student.name}
+        </p>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {cfg.label && (
+            <span
+              className="att-pill"
+              style={{ background: cfg.bg, color: cfg.text }}
+            >
+              {cfg.label}
+            </span>
+          )}
+          <span style={{ fontSize: 11, color: "#9ca3af" }}>
             Seat {student.seatNumber}
           </span>
-          <span className="text-xs text-slate-400">{student.phone}</span>
+          {student.phone && (
+            <span style={{ fontSize: 11, color: "#9ca3af" }}>
+              {student.phone}
+            </span>
+          )}
         </div>
       </div>
     </div>
