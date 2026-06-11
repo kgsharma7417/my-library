@@ -189,10 +189,18 @@ export default function AddStudent() {
         qrData,
       });
 
-      await setDoc(doc(db, "users", automaticUID), {
-        role: "student",
-        studentId: studentDocID,
-      });
+      try {
+        await setDoc(doc(db, "users", automaticUID), {
+          role: "student",
+          studentId: studentDocID,
+        });
+      } catch (roleErr) {
+        console.error("CRITICAL: users role mapping failed:", roleErr);
+        throw new Error(
+          "Role assign nahi ho paya. Firestore rules check karein. Error: " +
+            roleErr.message,
+        );
+      }
 
       setSavedStudentId(studentDocID);
       setSuccess(true);
