@@ -214,7 +214,7 @@ export default function Login() {
         <div className="lg-card">
           <div className="lg-brand">
             <div className="lg-brand-icon-wrap">📚</div>
-            <h2>Digital Library</h2>
+            <h2>LibraryPro</h2>
             <p>Apna library account access karein</p>
           </div>
 
