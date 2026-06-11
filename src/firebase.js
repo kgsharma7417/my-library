@@ -1,4 +1,5 @@
-import { initializeApp } from "firebase/app";
+// src/firebase.js
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
@@ -12,9 +13,24 @@ const firebaseConfig = {
   appId: "1:135844108680:web:5afdc7c05c83734b8b423d",
 };
 
-const app = initializeApp(firebaseConfig);
+// 1. Default App — sirf ek baar initialize hoga
+const app =
+  getApps().find((a) => a.name === "[DEFAULT]") ??
+  initializeApp(firebaseConfig);
 
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 export const auth = getAuth(app);
+
+// 2. Google Provider — select_account prompt force karta hai
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: "select_account" });
+
+// 3. Secondary App — admin panel mein naye student banate waqt
+//    current admin ka session logout na ho isliye alag instance
+const SECONDARY_NAME = "SecondaryApp";
+const secondaryApp =
+  getApps().find((a) => a.name === SECONDARY_NAME) ??
+  initializeApp(firebaseConfig, SECONDARY_NAME);
+
+export const secondaryAuth = getAuth(secondaryApp);

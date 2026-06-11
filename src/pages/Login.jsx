@@ -1,514 +1,396 @@
-import { useState } from "react";
+// src/pages/Login.jsx
+import { useState, useEffect } from "react";
 import { signInWithEmailAndPassword, signInWithPopup } from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
-import { useNavigate } from "react-router-dom";
 import { auth, db, googleProvider } from "../firebase";
+import { useNavigate } from "react-router-dom";
+import { doc, getDoc } from "firebase/firestore";
 
 export default function Login() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState("admin");
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
+  const [mounted, setMounted] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
-  // After any successful login, check role and redirect
-  const redirectByRole = async (uid) => {
-    try {
-      const snap = await getDoc(doc(db, "users", uid));
-      const role = snap.exists() ? snap.data()?.role || "student" : "student";
-      navigate(role === "admin" ? "/dashboard" : "/student-home", {
-        replace: true,
-      });
-    } catch {
-      navigate("/student-home", { replace: true });
-    }
-  };
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
-  const handleAdminLogin = async (e) => {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-    try {
-      const cred = await signInWithEmailAndPassword(auth, email, password);
-      await redirectByRole(cred.user.uid);
-    } catch {
-      setError("Email ya password galat hai.");
-    }
-    setLoading(false);
-  };
+  // Role-based routing — email aur Google dono ke liye common
+  const handleUserRouting = async (userInstance) => {
+    const userDocRef = doc(db, "users", userInstance.uid);
+    const userDocSnap = await getDoc(userDocRef);
 
-  const handleStudentLogin = async (e) => {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-    try {
-      const fakeEmail = `${phone}@library.app`;
-      const cred = await signInWithEmailAndPassword(auth, fakeEmail, phone);
-      await redirectByRole(cred.user.uid);
-    } catch {
-      setError("Phone number se koi account nahi mila. Admin se contact karo.");
-    }
-    setLoading(false);
-  };
-
-  const handleGoogleLogin = async () => {
-    setError("");
-    setGoogleLoading(true);
-
-    try {
-      const cred = await signInWithPopup(auth, googleProvider);
-
-      const user = cred.user;
-
-      const userRef = doc(db, "users", user.uid);
-
-      const snap = await getDoc(userRef);
-
-      // Agar user pehli baar login kar raha hai
-      if (!snap.exists()) {
-        await setDoc(userRef, {
-          uid: user.uid,
-          email: user.email,
-          role: "student",
-          createdAt: new Date().toISOString(),
-        });
+    if (userDocSnap.exists()) {
+      const userData = userDocSnap.data();
+      if (userData.role === "student") {
+        navigate("/student-home");
+      } else if (userData.role === "admin") {
+        navigate("/dashboard");
+      } else {
+        navigate("/");
       }
+    } else {
+      setError(
+        "Aap library database mein registered nahi hain. Kripya Admin se sampark karein.",
+      );
+    }
+  };
 
-      await redirectByRole(user.uid);
+  // Email/Password login
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    if (!email.trim() || !password) {
+      setError("Email aur Password dono bharna zaruri hai!");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const userCredential = await signInWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password,
+      );
+      await handleUserRouting(userCredential.user);
     } catch (err) {
-      if (err.code !== "auth/popup-closed-by-user") {
-        setError("Google sign-in fail hua. Dobara try karein.");
+      console.error(err);
+      if (
+        err.code === "auth/user-not-found" ||
+        err.code === "auth/wrong-password" ||
+        err.code === "auth/invalid-credential"
+      ) {
+        setError("Galat Email ID ya Password daala hai.");
+      } else {
+        setError("Login karne mein dikkat aayi: " + err.message);
       }
+    } finally {
+      setLoading(false);
     }
-
-    setGoogleLoading(false);
   };
+
+  // Google login — popup (localhost pe kaam karta hai, redirect nahi)
+  const handleGoogleLogin = async () => {
+    setGoogleLoading(true);
+    setError("");
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      await handleUserRouting(result.user);
+    } catch (err) {
+      console.error("Google Auth Error:", err);
+      if (err.code === "auth/popup-closed-by-user") {
+        setError("Google login window band kar di gayi.");
+      } else if (err.code === "auth/popup-blocked") {
+        setError("Browser ne popup block kar diya. Please popup allow karein.");
+      } else {
+        setError("Google se login nahi ho paya. Dobara try karein.");
+      }
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const isAnyLoading = loading || googleLoading;
+
   return (
     <>
       <style>{`
-        .login-bg {
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        *, *::before, *::after { box-sizing: border-box; }
+
+        .lg-page {
           min-height: 100vh;
-          background: #f0f2f8;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 24px 16px;
-          font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        }
-        .login-card {
-          background: #fff;
-          border-radius: 24px;
-          border: 1.5px solid #e5e7eb;
-          box-shadow: 0 8px 40px rgba(99,102,241,0.10);
-          width: 100%;
-          max-width: 420px;
-          padding: 36px 32px 32px;
-          animation: fadeUp 0.4s cubic-bezier(.22,1,.36,1) both;
-        }
-        .login-logo {
-          width: 52px; height: 52px;
-          border-radius: 16px;
-          background: linear-gradient(135deg, #6366f1, #818cf8);
+          background: linear-gradient(135deg, #eef2ff 0%, #f0f4ff 50%, #faf5ff 100%);
           display: flex; align-items: center; justify-content: center;
-          box-shadow: 0 4px 16px rgba(99,102,241,0.32);
-          margin: 0 auto 20px;
+          font-family: 'Inter', sans-serif; padding: 16px;
+          opacity: 0; transform: translateY(16px);
+          transition: opacity 0.45s ease, transform 0.45s ease;
         }
-        .login-logo svg { color: #fff; }
-        .login-title {
-          text-align: center;
-          font-size: 22px;
-          font-weight: 800;
-          color: #1e1b4b;
-          margin: 0 0 4px;
-          letter-spacing: -0.4px;
+        .lg-page.mounted { opacity: 1; transform: translateY(0); }
+
+        .lg-card {
+          background: #fff; border-radius: 28px;
+          border: 1.5px solid #e8eaf6;
+          box-shadow: 0 4px 6px rgba(99,102,241,0.04), 0 12px 40px rgba(99,102,241,0.08);
+          padding: 40px 36px 36px; max-width: 420px; width: 100%;
         }
-        .login-subtitle {
-          text-align: center;
-          font-size: 13px;
-          color: #9ca3af;
-          margin: 0 0 24px;
-        }
-        .login-tabs {
-          display: flex;
-          background: #f1f3f9;
-          border-radius: 12px;
-          padding: 4px;
-          margin-bottom: 24px;
-          gap: 4px;
-        }
-        .login-tab {
-          flex: 1;
-          padding: 9px;
-          border-radius: 9px;
-          border: none;
-          font-size: 13px;
-          font-weight: 700;
-          cursor: pointer;
-          transition: all 0.2s ease;
-          font-family: inherit;
-          color: #6b7280;
-          background: transparent;
-        }
-        .login-tab.active {
-          background: #fff;
-          color: #6366f1;
-          box-shadow: 0 2px 8px rgba(99,102,241,0.12);
-        }
-        .login-field { margin-bottom: 16px; }
-        .login-label {
-          display: block;
-          font-size: 11px;
-          font-weight: 700;
-          color: #6b7280;
-          text-transform: uppercase;
-          letter-spacing: 0.6px;
-          margin-bottom: 6px;
-        }
-        .login-input-wrap { position: relative; }
-        .login-input-icon {
-          position: absolute;
-          left: 12px; top: 50%;
-          transform: translateY(-50%);
-          color: #9ca3af;
-          pointer-events: none;
-          display: flex;
-        }
-        .login-input {
-          width: 100%;
-          box-sizing: border-box;
-          padding: 11px 12px 11px 38px;
-          border: 1.5px solid #e5e7eb;
-          border-radius: 12px;
-          font-size: 14px;
-          color: #1e1b4b;
-          background: #fafbff;
-          outline: none;
-          font-family: inherit;
-          transition: border-color 0.18s, box-shadow 0.18s;
-        }
-        .login-input:focus {
-          border-color: #6366f1;
-          box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
-          background: #fff;
-        }
-        .login-error {
-          background: #fef2f2;
-          border: 1.5px solid #fecaca;
-          border-radius: 10px;
-          padding: 10px 14px;
-          font-size: 13px;
-          color: #dc2626;
-          font-weight: 600;
-          margin-bottom: 16px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        .login-btn {
-          width: 100%;
-          padding: 13px;
-          border-radius: 13px;
-          border: none;
+
+        .lg-brand { text-align: center; margin-bottom: 28px; }
+        .lg-brand-icon-wrap {
+          width: 64px; height: 64px; border-radius: 18px;
           background: linear-gradient(135deg, #6366f1, #818cf8);
-          color: #fff;
-          font-size: 15px;
-          font-weight: 700;
-          cursor: pointer;
-          font-family: inherit;
-          box-shadow: 0 4px 14px rgba(99,102,241,0.3);
-          transition: all 0.18s ease;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          margin-top: 4px;
+          display: inline-flex; align-items: center; justify-content: center;
+          font-size: 30px; margin-bottom: 14px;
+          box-shadow: 0 6px 20px rgba(99,102,241,0.28);
         }
-        .login-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(99,102,241,0.4); }
-        .login-btn:active { transform: scale(0.98); }
-        .login-btn:disabled { background: #e5e7eb; color: #9ca3af; box-shadow: none; transform: none; cursor: not-allowed; }
-        /* Divider */
-        .login-divider {
-          display: flex; align-items: center; gap: 10px;
-          margin: 18px 0;
-          color: #d1d5db;
-          font-size: 12px; font-weight: 600;
+        .lg-brand h2 { color: #1e1b4b; font-size: 22px; font-weight: 800; margin: 0 0 5px; letter-spacing: -0.4px; }
+        .lg-brand p { color: #9ca3af; font-size: 13px; margin: 0; }
+
+        .lg-error-banner {
+          background: #fef2f2; border: 1.5px solid #fca5a5; color: #991b1b;
+          border-radius: 12px; padding: 11px 14px; font-size: 12.5px; font-weight: 600;
+          margin-bottom: 22px; display: flex; align-items: flex-start; gap: 8px;
+          line-height: 1.5; animation: slideDown 0.2s ease;
         }
-        .login-divider::before,
-        .login-divider::after {
-          content: ''; flex: 1;
-          height: 1px; background: #e5e7eb;
+        @keyframes slideDown { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+        .lg-error-close {
+          margin-left: auto; cursor: pointer; opacity: 0.6;
+          background: none; border: none; padding: 0;
+          color: #991b1b; font-size: 16px; line-height: 1; flex-shrink: 0;
         }
-        /* Google button */
-        .login-google-btn {
-          width: 100%;
-          padding: 12px;
-          border-radius: 13px;
-          border: 1.5px solid #e5e7eb;
-          background: #fff;
-          color: #374151;
-          font-size: 14px;
-          font-weight: 700;
-          cursor: pointer;
-          font-family: inherit;
-          transition: all 0.18s ease;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 10px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        .lg-error-close:hover { opacity: 1; }
+
+        .lg-form { display: flex; flex-direction: column; gap: 18px; }
+        .lg-field { display: flex; flex-direction: column; gap: 6px; }
+        .lg-label { font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.7px; }
+        .lg-input-wrap { position: relative; }
+        .lg-input-icon { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: #9ca3af; display: flex; pointer-events: none; }
+        .lg-input {
+          width: 100%; border-radius: 12px; border: 1.5px solid #e5e7eb;
+          background: #fafbff; color: #1e1b4b; font-size: 14px; font-family: inherit;
+          padding: 12px 12px 12px 40px; outline: none;
+          transition: border-color 0.18s, box-shadow 0.18s, background 0.18s;
         }
-        .login-google-btn:hover {
-          border-color: #c7d2fe;
-          background: #fafbff;
-          transform: translateY(-1px);
-          box-shadow: 0 4px 14px rgba(0,0,0,0.1);
+        .lg-input:focus { border-color: #6366f1; box-shadow: 0 0 0 3.5px rgba(99,102,241,0.13); background: #fff; }
+        .lg-input:disabled { opacity: 0.6; cursor: not-allowed; }
+        .lg-input::placeholder { color: #c4c9d4; }
+        .lg-input-pw { padding-right: 44px; }
+        .lg-pw-toggle {
+          position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+          background: none; border: none; cursor: pointer;
+          color: #9ca3af; display: flex; padding: 4px; transition: color 0.15s;
         }
-        .login-google-btn:active { transform: scale(0.98); }
-        .login-google-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-        .login-hint {
-          text-align: center;
-          font-size: 12px;
-          color: #9ca3af;
-          margin-top: 16px;
+        .lg-pw-toggle:hover { color: #6366f1; }
+
+        .lg-btn {
+          width: 100%; padding: 13px; border-radius: 13px;
+          font-size: 14px; font-weight: 700; cursor: pointer; border: none;
+          background: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+          color: #fff; box-shadow: 0 4px 16px rgba(99,102,241,0.3);
+          transition: all 0.2s ease; font-family: inherit;
+          display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 2px;
         }
-        .login-spin {
-          width: 16px; height: 16px;
-          border-radius: 50%;
-          border: 2.5px solid rgba(255,255,255,0.4);
-          border-top-color: #fff;
-          animation: spin 0.7s linear infinite;
-        }
-        .login-spin-dark {
-          width: 16px; height: 16px;
-          border-radius: 50%;
-          border: 2.5px solid #e5e7eb;
-          border-top-color: #6366f1;
-          animation: spin 0.7s linear infinite;
-        }
-        @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(18px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
+        .lg-btn:hover:not(:disabled) { background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); box-shadow: 0 6px 20px rgba(99,102,241,0.4); transform: translateY(-1px); }
+        .lg-btn:active:not(:disabled) { transform: translateY(0); }
+        .lg-btn:disabled { opacity: 0.65; cursor: not-allowed; }
+
         @keyframes spin { to { transform: rotate(360deg); } }
+        .lg-btn-spinner {
+          width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.4);
+          border-top-color: #fff; border-radius: 50%;
+          animation: spin 0.7s linear infinite; flex-shrink: 0;
+        }
+
+        .lg-divider { display: flex; align-items: center; gap: 10px; margin: 22px 0; }
+        .lg-divider-line { flex: 1; height: 1.5px; background: #f0f1f8; }
+        .lg-divider-text { color: #b0b8cc; font-size: 11.5px; font-weight: 700; letter-spacing: 0.5px; }
+
+        .lg-google-btn {
+          width: 100%; padding: 12px; border-radius: 13px;
+          font-size: 14px; font-weight: 600; cursor: pointer;
+          background: #fff; color: #374151; border: 1.5px solid #e5e7eb;
+          display: flex; align-items: center; justify-content: center; gap: 10px;
+          transition: all 0.18s ease; font-family: inherit;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+        }
+        .lg-google-btn:hover:not(:disabled) { background: #f8f9ff; border-color: #c7d2fe; color: #1e1b4b; box-shadow: 0 2px 8px rgba(99,102,241,0.1); transform: translateY(-1px); }
+        .lg-google-btn:active:not(:disabled) { transform: translateY(0); }
+        .lg-google-btn:disabled { opacity: 0.65; cursor: not-allowed; }
+        .lg-google-spinner {
+          width: 18px; height: 18px; border: 2px solid #e5e7eb;
+          border-top-color: #6366f1; border-radius: 50%;
+          animation: spin 0.7s linear infinite; flex-shrink: 0;
+        }
+
+        @media (max-width: 460px) {
+          .lg-card { padding: 28px 20px 24px; border-radius: 22px; }
+        }
       `}</style>
 
-      <div className="login-bg">
-        <div className="login-card">
-          {/* Logo */}
-          <div className="login-logo">
-            <svg
-              width="26"
-              height="26"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"
-              />
-            </svg>
+      <div className={`lg-page${mounted ? " mounted" : ""}`}>
+        <div className="lg-card">
+          <div className="lg-brand">
+            <div className="lg-brand-icon-wrap">📚</div>
+            <h2>Digital Library</h2>
+            <p>Apna library account access karein</p>
           </div>
 
-          <h1 className="login-title">Library Pro</h1>
-          <p className="login-subtitle">Apne account mein sign in karein</p>
-
-          {/* Tabs */}
-          <div className="login-tabs">
-            <button
-              className={`login-tab${tab === "admin" ? " active" : ""}`}
-              onClick={() => {
-                setTab("admin");
-                setError("");
-              }}
-            >
-              👨‍💼 Admin
-            </button>
-            <button
-              className={`login-tab${tab === "student" ? " active" : ""}`}
-              onClick={() => {
-                setTab("student");
-                setError("");
-              }}
-            >
-              🎓 Student
-            </button>
-          </div>
-
-          {/* Error */}
           {error && (
-            <div className="login-error">
-              <svg
-                width="14"
-                height="14"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
+            <div className="lg-error-banner">
+              <span>⚠️</span>
+              <span style={{ flex: 1 }}>{error}</span>
+              <button
+                className="lg-error-close"
+                onClick={() => setError("")}
+                aria-label="Close"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
-                />
-              </svg>
-              {error}
+                ✕
+              </button>
             </div>
           )}
 
-          {/* ── Google Sign-In (works for both admin & student) ── */}
+          <form className="lg-form" onSubmit={handleLogin} noValidate>
+            <div className="lg-field">
+              <label className="lg-label">Email Address</label>
+              <div className="lg-input-wrap">
+                <span className="lg-input-icon">
+                  <svg
+                    width="15"
+                    height="15"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"
+                    />
+                  </svg>
+                </span>
+                <input
+                  type="email"
+                  className="lg-input"
+                  placeholder="name@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={isAnyLoading}
+                  autoComplete="email"
+                />
+              </div>
+            </div>
+
+            <div className="lg-field">
+              <label className="lg-label">Password</label>
+              <div className="lg-input-wrap">
+                <span className="lg-input-icon">
+                  <svg
+                    width="15"
+                    height="15"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
+                    />
+                  </svg>
+                </span>
+                <input
+                  type={showPassword ? "text" : "password"}
+                  className="lg-input lg-input-pw"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={isAnyLoading}
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  className="lg-pw-toggle"
+                  onClick={() => setShowPassword((p) => !p)}
+                  tabIndex={-1}
+                >
+                  {showPassword ? (
+                    <svg
+                      width="16"
+                      height="16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88"
+                      />
+                    </svg>
+                  ) : (
+                    <svg
+                      width="16"
+                      height="16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                      />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <button type="submit" className="lg-btn" disabled={isAnyLoading}>
+              {loading ? (
+                <>
+                  <span className="lg-btn-spinner" />
+                  Verifying...
+                </>
+              ) : (
+                "Sign In"
+              )}
+            </button>
+          </form>
+
+          <div className="lg-divider">
+            <div className="lg-divider-line" />
+            <span className="lg-divider-text">OR</span>
+            <div className="lg-divider-line" />
+          </div>
+
           <button
-            className="login-google-btn"
+            type="button"
+            className="lg-google-btn"
             onClick={handleGoogleLogin}
-            disabled={googleLoading || loading}
+            disabled={isAnyLoading}
           >
             {googleLoading ? (
-              <span className="login-spin-dark" />
+              <>
+                <span className="lg-google-spinner" />
+                Connecting to Google...
+              </>
             ) : (
-              <svg width="18" height="18" viewBox="0 0 48 48">
-                <path
-                  fill="#EA4335"
-                  d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-                />
-                <path
-                  fill="#4285F4"
-                  d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-                />
-              </svg>
+              <>
+                <svg width="18" height="18" viewBox="0 0 24 24">
+                  <path
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                    fill="#4285F4"
+                  />
+                  <path
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    fill="#34A853"
+                  />
+                  <path
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                    fill="#FBBC05"
+                  />
+                  <path
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                    fill="#EA4335"
+                  />
+                </svg>
+                Continue with Google
+              </>
             )}
-            {googleLoading
-              ? "Sign in ho raha hai..."
-              : "Google se Sign In karein"}
           </button>
-
-          <div className="login-divider">ya</div>
-
-          {/* Admin Form */}
-          {tab === "admin" && (
-            <form onSubmit={handleAdminLogin}>
-              <div className="login-field">
-                <label className="login-label">Email</label>
-                <div className="login-input-wrap">
-                  <span className="login-input-icon">
-                    <svg
-                      width="15"
-                      height="15"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"
-                      />
-                    </svg>
-                  </span>
-                  <input
-                    className="login-input"
-                    type="email"
-                    placeholder="admin@library.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-              <div className="login-field">
-                <label className="login-label">Password</label>
-                <div className="login-input-wrap">
-                  <span className="login-input-icon">
-                    <svg
-                      width="15"
-                      height="15"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
-                      />
-                    </svg>
-                  </span>
-                  <input
-                    className="login-input"
-                    type="password"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-              <button className="login-btn" type="submit" disabled={loading}>
-                {loading ? <span className="login-spin" /> : null}
-                {loading ? "Sign in ho raha hai..." : "Admin Login"}
-              </button>
-            </form>
-          )}
-
-          {/* Student Form */}
-          {tab === "student" && (
-            <form onSubmit={handleStudentLogin}>
-              <div className="login-field">
-                <label className="login-label">Phone Number</label>
-                <div className="login-input-wrap">
-                  <span className="login-input-icon">
-                    <svg
-                      width="15"
-                      height="15"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"
-                      />
-                    </svg>
-                  </span>
-                  <input
-                    className="login-input"
-                    type="tel"
-                    placeholder="10-digit phone number"
-                    value={phone}
-                    onChange={(e) =>
-                      setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
-                    }
-                    required
-                  />
-                </div>
-              </div>
-              <button
-                className="login-btn"
-                type="submit"
-                disabled={loading || phone.length !== 10}
-              >
-                {loading ? <span className="login-spin" /> : null}
-                {loading ? "Sign in ho raha hai..." : "Student Login"}
-              </button>
-              <p className="login-hint">Aapka phone number hi password hai</p>
-            </form>
-          )}
         </div>
       </div>
     </>

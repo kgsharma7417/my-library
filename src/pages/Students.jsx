@@ -1,7 +1,8 @@
 // src/pages/Students.jsx
 import { useEffect, useState } from "react";
-import { collection, getDocs, deleteDoc, doc } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
+import { useAuth } from "../context/AuthContext"; // 👈 ADDED
 import StudentQRCard from "../components/StudentQRCard";
 import { useNavigate } from "react-router-dom";
 
@@ -28,22 +29,32 @@ const SHIFT_CONFIG = {
 
 export default function Students() {
   const navigate = useNavigate();
+  const { user } = useAuth(); // 👈 ADDED — admin ka uid milega
+
   const [students, setStudents] = useState([]);
   const [search, setSearch] = useState("");
   const [shiftFilter, setShiftFilter] = useState("all");
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState("grid"); // grid | list
-  const [sortBy, setSortBy] = useState("name"); // name | seat | shift
+  const [viewMode, setViewMode] = useState("grid");
+  const [sortBy, setSortBy] = useState("name");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    if (!user) return; // 👈 ADDED — user load hone ka wait karo
     fetchStudents();
     setTimeout(() => setMounted(true), 60);
-  }, []);
+  }, [user]); // 👈 CHANGED — user dependency add ki
 
   const fetchStudents = async () => {
     setLoading(true);
-    const snapshot = await getDocs(collection(db, "students"));
+
+    // ✅ CHANGED — pehle getDocs(collection(db,"students")) tha
+    // Ab sirf is admin ke students fetch honge
+    const q = query(
+      collection(db, "students"),
+      where("adminId", "==", user.uid),
+    );
+    const snapshot = await getDocs(q);
     const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
     setStudents(data);
     setLoading(false);
@@ -87,7 +98,6 @@ export default function Students() {
         .st-page.mounted { opacity: 1; transform: translateY(0); }
         .st-wrap { max-width: 1120px; margin: 0 auto; }
 
-        /* Header */
         .st-header {
           display: flex;
           align-items: center;
@@ -121,7 +131,6 @@ export default function Students() {
         .st-add-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(99,102,241,0.4); }
         .st-add-btn:active { transform: scale(0.97); }
 
-        /* Stats Row */
         .st-stats {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
@@ -147,7 +156,6 @@ export default function Students() {
         .st-stat-val { font-size: 22px; font-weight: 800; color: #1e1b4b; line-height: 1; }
         .st-stat-lbl { font-size: 11px; color: #9ca3af; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
 
-        /* Toolbar */
         .st-toolbar {
           background: #fff;
           border: 1.5px solid #e5e7eb;
@@ -201,7 +209,6 @@ export default function Students() {
         }
         .st-view-btn.active { background: #6366f1; color: #fff; border-color: #6366f1; }
 
-        /* Grid */
         .st-grid {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -209,7 +216,6 @@ export default function Students() {
         }
         .st-list { display: flex; flex-direction: column; gap: 8px; }
 
-        /* Student Card */
         .st-card {
           background: #fff;
           border: 1.5px solid #e5e7eb;
@@ -275,7 +281,6 @@ export default function Students() {
         .st-arrow { color: #9ca3af; flex-shrink: 0; transition: transform 0.18s; }
         .st-card-list:hover .st-arrow { transform: translateX(4px); color: #6366f1; }
 
-        /* Empty */
         .st-empty {
           grid-column: 1 / -1;
           display: flex; flex-direction: column; align-items: center; gap: 12px;
@@ -287,7 +292,6 @@ export default function Students() {
           font-size: 28px;
         }
 
-        /* Loading */
         .st-loading {
           display: flex; flex-direction: column; align-items: center; gap: 14px;
           padding: 80px 20px;

@@ -67,10 +67,18 @@ function getWeekdayShort(ts) {
 
 export default function StudentHome() {
   const navigate = useNavigate();
-
   const { user } = useAuth();
 
   const [id, setId] = useState(null);
+  const [student, setStudent] = useState(null);
+  const [qrDataURL, setQrDataURL] = useState(null);
+  const [attendance, setAttendance] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
+  const [qrCopied, setQrCopied] = useState(false);
+  const [mappingError, setMappingError] = useState(false);
+
+  // Step 1: Fetch associated studentId from users collection mapping node
   useEffect(() => {
     const fetchStudentId = async () => {
       if (!user?.uid) return;
@@ -80,31 +88,32 @@ export default function StudentHome() {
 
         if (userSnap.exists()) {
           const data = userSnap.data();
-
-          setId(data.studentId);
+          if (data.studentId) {
+            setId(data.studentId);
+          } else {
+            setMappingError(true);
+            setLoading(false);
+          }
+        } else {
+          setMappingError(true);
+          setLoading(false);
         }
       } catch (e) {
-        console.error(e);
+        console.error("User mapping query failure:", e);
+        setLoading(false);
       }
     };
 
     fetchStudentId();
   }, [user]);
-  const [student, setStudent] = useState(null);
-  const [qrDataURL, setQrDataURL] = useState(null);
-  const [attendance, setAttendance] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [mounted, setMounted] = useState(false);
-  const [qrCopied, setQrCopied] = useState(false);
 
+  // Step 2: Initialize secondary synchronization pipeline when studentId pointer connects
   useEffect(() => {
     if (!id) return;
 
     const init = async () => {
       await Promise.all([fetchStudent(), fetchAttendance()]);
-
       setLoading(false);
-
       setTimeout(() => setMounted(true), 60);
     };
 
@@ -129,7 +138,7 @@ export default function StudentHome() {
         setQrDataURL(url);
       }
     } catch (e) {
-      console.error(e);
+      console.error("Student profile parsing error:", e);
     }
   };
 
@@ -150,7 +159,7 @@ export default function StudentHome() {
         .sort((a, b) => b.timestamp?.toMillis() - a.timestamp?.toMillis());
       setAttendance(records);
     } catch (e) {
-      console.error(e);
+      console.error("Attendance log retrieval error:", e);
     }
   };
 
@@ -177,6 +186,7 @@ export default function StudentHome() {
     setTimeout(() => setQrCopied(false), 2200);
   };
 
+  // UI state management for structural loader
   if (loading) {
     return (
       <div
@@ -221,6 +231,55 @@ export default function StudentHome() {
     );
   }
 
+  // Handle case where authentication exists but database pointer mapping fails
+  if (mappingError) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "#f0f2f8",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "Inter, sans-serif",
+          padding: 16,
+        }}
+      >
+        <div
+          style={{
+            background: "#fff",
+            borderRadius: 20,
+            padding: "32px 24px",
+            border: "1.5px solid #e5e7eb",
+            textAlign: "center",
+            maxWidth: 400,
+            width: "100%",
+          }}
+        >
+          <div style={{ fontSize: 42, marginBottom: 12 }}>⚠️</div>
+          <h2 style={{ color: "#1e1b4b", fontWeight: 800, margin: "0 0 8px" }}>
+            Mapping Profile Missing
+          </h2>
+          <p
+            style={{
+              color: "#6b7280",
+              fontSize: 13,
+              lineHeight: "1.5",
+              margin: "0 0 20px",
+            }}
+          >
+            Aapka email registered hai par user record complete nahi mila.
+            Kripya library administrator se bolkar check karein ki aapka UID
+            correctly linked hai ya nahi.
+          </p>
+          <button className="sv-qr-share" onClick={() => navigate("/")}>
+            Go to Home
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!student) return null;
 
   const daysLeft = daysLeftCalc(student.endDate);
@@ -240,7 +299,7 @@ export default function StudentHome() {
   const isExpired = daysLeft !== null && daysLeft < 0;
   const shiftCfg = SHIFT_CONFIG[student.shift] || SHIFT_CONFIG.morning;
 
-  // Build last-30-days calendar strip
+  // Build calendar matrix tracking past month cycles
   const calendarDays = Array.from({ length: 30 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (29 - i));
@@ -269,7 +328,7 @@ export default function StudentHome() {
         .sv-page.mounted { opacity: 1; transform: translateY(0); }
         .sv-wrap { max-width: 480px; margin: 0 auto; }
 
-        /* Back nav */
+        /* Back navigation */
         .sv-back {
           display: inline-flex; align-items: center; gap: 6px;
           color: #6b7280; font-size: 13px; font-weight: 600;
@@ -279,7 +338,7 @@ export default function StudentHome() {
         }
         .sv-back:hover { color: #1e1b4b; }
 
-        /* Card base */
+        /* Card panels layout */
         .sv-card {
           background: #fff;
           border: 1.5px solid #e5e7eb;
@@ -290,7 +349,7 @@ export default function StudentHome() {
           animation: fadeUp 0.4s cubic-bezier(.22,1,.36,1) both;
         }
 
-        /* Profile strip */
+        /* Profile metadata elements */
         .sv-profile {
           display: flex; align-items: center; gap: 14px;
           padding: 20px 22px;
@@ -319,7 +378,7 @@ export default function StudentHome() {
           box-shadow: 0 0 0 2px rgba(52,211,153,0.3);
         }
 
-        /* QR Section */
+        /* QR Frame wrappers */
         .sv-qr-body {
           display: flex; flex-direction: column; align-items: center;
           padding: 28px 22px 24px;
@@ -359,157 +418,65 @@ export default function StudentHome() {
           gap: 8px; color: #9ca3af; font-size: 12px; margin-bottom: 16px;
         }
 
-        /* Subscription Card */
+        /* Subscription metadata display */
         .sv-sub-head {
           display: flex; align-items: center; justify-content: space-between;
           padding: 18px 22px 14px;
           border-bottom: 1.5px solid #f1f3f9;
         }
-        .sv-sub-title {
-          font-size: 14px; font-weight: 800; color: #1e1b4b; margin: 0 0 2px;
-        }
+        .sv-sub-title { font-size: 14px; font-weight: 800; color: #1e1b4b; margin: 0 0 2px; }
         .sv-sub-subtitle { font-size: 12px; color: #9ca3af; margin: 0; }
-
-        .sv-days-display {
-          display: flex; flex-direction: column; align-items: flex-end;
-        }
-        .sv-days-num {
-          font-size: 28px; font-weight: 800; line-height: 1;
-          letter-spacing: -1px;
-        }
+        .sv-days-display { display: flex; flex-direction: column; align-items: flex-end; }
+        .sv-days-num { font-size: 28px; font-weight: 800; line-height: 1; letter-spacing: -1px; }
         .sv-days-lbl { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
-
         .sv-sub-body { padding: 16px 22px 20px; }
 
-        /* Progress Bar */
+        /* Progress tracker metrics */
         .sv-progress-wrap { margin-bottom: 18px; }
-        .sv-progress-labels {
-          display: flex; justify-content: space-between;
-          font-size: 11px; color: #9ca3af; margin-bottom: 7px; font-weight: 600;
-        }
-        .sv-progress-track {
-          height: 8px; background: #f1f3f9; border-radius: 100px; overflow: hidden;
-        }
-        .sv-progress-fill {
-          height: 100%; border-radius: 100px;
-          transition: width 0.8s cubic-bezier(.22,1,.36,1);
-        }
+        .sv-progress-labels { display: flex; justify-content: space-between; font-size: 11px; color: #9ca3af; margin-bottom: 7px; font-weight: 600; }
+        .sv-progress-track { height: 8px; background: #f1f3f9; border-radius: 100px; overflow: hidden; }
+        .sv-progress-fill { height: 100%; border-radius: 100px; transition: width 0.8s cubic-bezier(.22,1,.36,1); }
 
-        /* Subscription detail grid */
-        .sv-detail-grid {
-          display: grid; grid-template-columns: 1fr 1fr;
-          gap: 10px;
-        }
-        .sv-detail-box {
-          background: #fafbff; border: 1.5px solid #f1f3f9;
-          border-radius: 13px; padding: 12px 14px;
-        }
-        .sv-detail-label {
-          font-size: 10px; font-weight: 700; color: #9ca3af;
-          text-transform: uppercase; letter-spacing: 0.6px; margin: 0 0 5px;
-        }
-        .sv-detail-value {
-          font-size: 14px; font-weight: 800; color: #1e1b4b; margin: 0;
-        }
+        /* Details layout grid */
+        .sv-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .sv-detail-box { background: #fafbff; border: 1.5px solid #f1f3f9; border-radius: 13px; padding: 12px 14px; }
+        .sv-detail-label { font-size: 10px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.6px; margin: 0 0 5px; }
+        .sv-detail-value { font-size: 14px; font-weight: 800; color: #1e1b4b; margin: 0; }
 
-        /* Expiry warning */
-        .sv-warning {
-          display: flex; align-items: center; gap: 10px;
-          background: #fef2f2; border: 1.5px solid #fecaca;
-          border-radius: 12px; padding: 11px 14px;
-          margin-bottom: 16px;
-          animation: pulse-bg 2s ease-in-out infinite;
-        }
-        .sv-warning-icon {
-          width: 30px; height: 30px; border-radius: 9px;
-          background: #fee2e2; display: flex; align-items: center; justify-content: center;
-          flex-shrink: 0;
-        }
+        /* Threshold Warnings styling rules */
+        .sv-warning { display: flex; align-items: center; gap: 10px; background: #fef2f2; border: 1.5px solid #fecaca; border-radius: 12px; padding: 11px 14px; margin-bottom: 16px; animation: pulse-bg 2s ease-in-out infinite; }
+        .sv-warning-icon { width: 30px; height: 30px; border-radius: 9px; background: #fee2e2; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .sv-warning-title { font-size: 13px; font-weight: 700; color: #991b1b; margin: 0 0 1px; }
         .sv-warning-sub { font-size: 11.5px; color: #b91c1c; margin: 0; }
+        .sv-expired-banner { display: flex; align-items: center; gap: 10px; background: #fef2f2; border: 1.5px solid #fca5a5; border-radius: 12px; padding: 11px 14px; margin-bottom: 16px; }
 
-        .sv-expired-banner {
-          display: flex; align-items: center; gap: 10px;
-          background: #fef2f2; border: 1.5px solid #fca5a5;
-          border-radius: 12px; padding: 11px 14px;
-          margin-bottom: 16px;
-        }
-
-        /* Attendance History */
-        .sv-att-head {
-          display: flex; align-items: center; justify-content: space-between;
-          padding: 18px 22px 14px; border-bottom: 1.5px solid #f1f3f9;
-        }
+        /* Attendance log components list */
+        .sv-att-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px 14px; border-bottom: 1.5px solid #f1f3f9; }
         .sv-att-title { font-size: 14px; font-weight: 800; color: #1e1b4b; margin: 0 0 2px; }
         .sv-att-subtitle { font-size: 12px; color: #9ca3af; margin: 0; }
-        .sv-att-badge {
-          background: #eef2ff; color: #4f46e5;
-          font-size: 13px; font-weight: 800;
-          padding: 5px 12px; border-radius: 9px;
-          border: 1px solid #c7d2fe;
-        }
+        .sv-att-badge { background: #eef2ff; color: #4f46e5; font-size: 13px; font-weight: 800; padding: 5px 12px; border-radius: 9px; border: 1px solid #c7d2fe; }
 
-        /* Calendar strip */
-        .sv-calendar {
-          padding: 16px 22px 6px;
-          border-bottom: 1.5px solid #f1f3f9;
-        }
-        .sv-cal-label {
-          font-size: 11px; font-weight: 700; color: #9ca3af;
-          text-transform: uppercase; letter-spacing: 0.6px;
-          margin-bottom: 10px;
-        }
-        .sv-cal-grid {
-          display: grid;
-          grid-template-columns: repeat(10, 1fr);
-          gap: 5px;
-        }
-        .sv-cal-day {
-          aspect-ratio: 1; border-radius: 7px;
-          display: flex; align-items: center; justify-content: center;
-          font-size: 9px; font-weight: 700;
-          transition: transform 0.15s ease;
-        }
+        /* Heatmap Grid matrix components */
+        .sv-calendar { padding: 16px 22px 6px; border-bottom: 1.5px solid #f1f3f9; }
+        .sv-cal-label { font-size: 11px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px; }
+        .sv-cal-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 5px; }
+        .sv-cal-day { aspect-ratio: 1; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; transition: transform 0.15s ease; }
         .sv-cal-day:hover { transform: scale(1.15); }
         .sv-cal-present { background: #6366f1; color: #fff; }
         .sv-cal-absent { background: #f1f3f9; color: #c7d2fe; }
         .sv-cal-today { background: #1e1b4b; color: #fff; }
 
-        /* Attendance list */
         .sv-att-list { padding: 12px 22px 20px; }
-        .sv-att-item {
-          display: flex; align-items: center; gap: 12px;
-          padding: 10px 0; border-bottom: 1.5px solid #f8fafc;
-          animation: fadeUp 0.35s cubic-bezier(.22,1,.36,1) both;
-        }
+        .sv-att-item { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1.5px solid #f8fafc; animation: fadeUp 0.35s cubic-bezier(.22,1,.36,1) both; }
         .sv-att-item:last-child { border-bottom: none; }
-        .sv-att-av {
-          width: 38px; height: 38px; border-radius: 11px; flex-shrink: 0;
-          background: #eef2ff; display: flex; align-items: center; justify-content: center;
-        }
+        .sv-att-av { width: 38px; height: 38px; border-radius: 11px; flex-shrink: 0; background: #eef2ff; display: flex; align-items: center; justify-content: center; }
         .sv-att-day { font-size: 12px; font-weight: 800; color: #1e1b4b; margin: 0 0 2px; }
         .sv-att-date { font-size: 11px; color: #9ca3af; margin: 0; }
-        .sv-att-time {
-          margin-left: auto; flex-shrink: 0;
-          font-size: 12px; font-weight: 700; color: #6366f1;
-          background: #eef2ff; border: 1px solid #c7d2fe;
-          padding: 4px 10px; border-radius: 8px;
-        }
-        .sv-att-checkmark {
-          width: 18px; height: 18px; border-radius: 50%;
-          background: #10b981; display: flex; align-items: center; justify-content: center;
-          flex-shrink: 0;
-        }
+        .sv-att-time { margin-left: auto; flex-shrink: 0; font-size: 12px; font-weight: 700; color: #6366f1; background: #eef2ff; border: 1px solid #c7d2fe; padding: 4px 10px; border-radius: 8px; }
+        .sv-att-checkmark { width: 18px; height: 18px; border-radius: 50%; background: #10b981; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 
-        .sv-empty-att {
-          display: flex; flex-direction: column; align-items: center; gap: 10px;
-          padding: 32px 20px; color: #9ca3af;
-        }
-        .sv-empty-icon {
-          width: 48px; height: 48px; border-radius: 14px;
-          background: #f1f3f9; display: flex; align-items: center; justify-content: center;
-          font-size: 22px;
-        }
+        .sv-empty-att { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 32px 20px; color: #9ca3af; }
+        .sv-empty-icon { width: 48px; height: 48px; border-radius: 14px; background: #f1f3f9; display: flex; align-items: center; justify-content: center; font-size: 22px; }
 
         @keyframes fadeUp {
           from { opacity: 0; transform: translateY(12px); }
@@ -524,7 +491,7 @@ export default function StudentHome() {
 
       <div className={`sv-page${mounted ? " mounted" : ""}`}>
         <div className="sv-wrap">
-          {/* Back */}
+          {/* Back Navigation Bar */}
           <button className="sv-back" onClick={() => navigate(-1)}>
             <svg
               width="15"
@@ -543,7 +510,7 @@ export default function StudentHome() {
             Back
           </button>
 
-          {/* ── Profile strip ── */}
+          {/* ── Profile strip Card ── */}
           <div className="sv-card" style={{ animationDelay: "0s" }}>
             <div className="sv-profile">
               <div className="sv-avatar">
@@ -569,7 +536,7 @@ export default function StudentHome() {
               </div>
             </div>
 
-            {/* ── QR Code ── */}
+            {/* ── QR Container View ── */}
             <div className="sv-qr-body">
               {qrDataURL ? (
                 <div className="sv-qr-frame">
@@ -642,7 +609,7 @@ export default function StudentHome() {
             </div>
           </div>
 
-          {/* ── Subscription Card ── */}
+          {/* ── Subscription Management Panel ── */}
           <div className="sv-card" style={{ animationDelay: "0.08s" }}>
             <div className="sv-sub-head">
               <div>
@@ -682,7 +649,7 @@ export default function StudentHome() {
             </div>
 
             <div className="sv-sub-body">
-              {/* Warning banner */}
+              {/* Threshold Warnings conditional wrappers */}
               {isExpired && (
                 <div className="sv-expired-banner">
                   <div className="sv-warning-icon">
@@ -739,7 +706,7 @@ export default function StudentHome() {
                 </div>
               )}
 
-              {/* Progress bar */}
+              {/* Progress track container */}
               <div className="sv-progress-wrap">
                 <div className="sv-progress-labels">
                   <span>Start: {formatDate(student.startDate)}</span>
@@ -760,7 +727,7 @@ export default function StudentHome() {
                 </div>
               </div>
 
-              {/* Detail grid */}
+              {/* Meta Detail Grid structure */}
               <div className="sv-detail-grid">
                 <div className="sv-detail-box">
                   <p className="sv-detail-label">Seat</p>
@@ -794,7 +761,7 @@ export default function StudentHome() {
             </div>
           </div>
 
-          {/* ── Attendance History ── */}
+          {/* ── Attendance Log History view ── */}
           <div className="sv-card" style={{ animationDelay: "0.16s" }}>
             <div className="sv-att-head">
               <div>
@@ -807,7 +774,7 @@ export default function StudentHome() {
               <span className="sv-att-badge">{attendance.length} / 30</span>
             </div>
 
-            {/* Calendar heatmap strip */}
+            {/* Micro calendar heat strip */}
             <div className="sv-calendar">
               <p className="sv-cal-label">Daily presence</p>
               <div className="sv-cal-grid">
@@ -827,7 +794,7 @@ export default function StudentHome() {
                   );
                 })}
               </div>
-              {/* Legend */}
+              {/* Legends wrapper block */}
               <div
                 style={{
                   display: "flex",
@@ -859,7 +826,6 @@ export default function StudentHome() {
                         width: 14,
                         height: 14,
                         borderRadius: 4,
-                        fontSize: 9,
                         flexShrink: 0,
                       }}
                     />
@@ -869,7 +835,7 @@ export default function StudentHome() {
               </div>
             </div>
 
-            {/* Attendance list */}
+            {/* Log iteration feed */}
             <div className="sv-att-list">
               {attendance.length === 0 ? (
                 <div className="sv-empty-att">
@@ -884,7 +850,7 @@ export default function StudentHome() {
                   >
                     No attendance yet
                   </p>
-                  <p style={{ fontSize: 12, margin: 0 }}>
+                  <p style={{ fontSize: 12, margin: 0, textAlign: "center" }}>
                     Scan your QR code at the entrance to mark attendance
                   </p>
                 </div>

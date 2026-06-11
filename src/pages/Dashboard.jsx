@@ -1,7 +1,16 @@
 // src/pages/Dashboard.jsx
 import { useEffect, useState } from "react";
-import { collection, getDocs, doc, getDoc, setDoc } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  doc,
+  getDoc,
+  setDoc,
+  query,
+  where,
+} from "firebase/firestore";
 import { db } from "../firebase";
+import { useAuth } from "../context/AuthContext"; // 👈 ADDED
 import SeatLayout from "../components/SeatLayout";
 
 const SHIFT_CONFIG = {
@@ -86,6 +95,8 @@ const SHIFT_CONFIG = {
 };
 
 export default function Dashboard() {
+  const { user } = useAuth(); // 👈 ADDED — admin ka uid milega
+
   const [students, setStudents] = useState([]);
   const [filterShift, setFilterShift] = useState("all");
   const [totalSeats, setTotalSeats] = useState(30);
@@ -95,9 +106,18 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!user) return; // 👈 ADDED — user load hone ka wait karo
+
     const fetchData = async () => {
       setLoading(true);
-      const snap = await getDocs(collection(db, "students"));
+
+      // ✅ CHANGED — pehle getDocs(collection(db,"students")) tha
+      // Ab sirf is admin ke students fetch honge
+      const q = query(
+        collection(db, "students"),
+        where("adminId", "==", user.uid),
+      );
+      const snap = await getDocs(q);
       setStudents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
       try {
@@ -111,8 +131,9 @@ export default function Dashboard() {
 
       setLoading(false);
     };
+
     fetchData();
-  }, []);
+  }, [user]); // 👈 CHANGED — user dependency add ki
 
   const handleSeatSave = async () => {
     const val = parseInt(seatInput);
@@ -318,7 +339,6 @@ export default function Dashboard() {
             shadow={SHIFT_CONFIG.fullday.shadow}
             icon={SHIFT_CONFIG.fullday.icon}
           />
-
           <StatCard
             label="Seats Free"
             value={freeSeats}
@@ -351,7 +371,7 @@ export default function Dashboard() {
           />
         </div>
 
-        {/* ── Live Seat Map Container ── */}
+        {/* ── Live Seat Map ── */}
         <div className="bg-white rounded-2xl border border-slate-200/70 shadow-xl shadow-slate-200/30 mb-8 overflow-hidden transform hover:border-slate-300/80 transition-all duration-300">
           <div className="px-6 py-4 bg-slate-50/50 backdrop-blur-sm border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-3">
@@ -424,7 +444,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Premium Shift Filter Pills */}
+            {/* Shift Filter Pills */}
             <div className="flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-xl border border-slate-200/40 backdrop-blur-sm">
               {["all", "morning", "evening", "fullday"].map((s) => {
                 const active = filterShift === s;
@@ -464,7 +484,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Desktop Table View */}
+          {/* Desktop Table */}
           <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -530,7 +550,7 @@ export default function Dashboard() {
             </table>
           </div>
 
-          {/* Responsive Mobile Layout View */}
+          {/* Mobile Layout */}
           <div className="sm:hidden divide-y divide-slate-100 bg-white">
             {filtered.map((s) => (
               <div
@@ -577,7 +597,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Footer Metrics */}
+        {/* Footer */}
         <p className="text-center text-[11px] font-bold uppercase tracking-widest text-slate-400 mt-8 pb-4">
           Metric Echo: {students.length} Allocated · {freeSeats} Available ·{" "}
           {totalSeats} Absolute Bounds
@@ -587,7 +607,7 @@ export default function Dashboard() {
   );
 }
 
-/* ─── Sub-components (Optimized for Premium Architecture) ─────────────────────────────────────── */
+/* ─── Sub-components ─────────────────────────────────── */
 
 function StatCard({ label, value, sub, gradient, shadow, icon, extraSlot }) {
   return (
