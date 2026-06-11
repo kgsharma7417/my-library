@@ -1,6 +1,16 @@
 // src/pages/StudentProfile.jsx
 import { useState, useEffect, useRef } from "react";
-import { doc, getDoc, updateDoc, deleteDoc } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  updateDoc,
+  deleteDoc,
+  collection,
+  addDoc,
+  getDocs,
+  query,
+  orderBy,
+} from "firebase/firestore";
 import {
   ref,
   uploadBytes,
@@ -8,36 +18,37 @@ import {
   deleteObject,
 } from "firebase/storage";
 import { db, storage } from "../firebase";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+import { useNavigate, useParams } from "react-router-dom";
 import QRCode from "qrcode";
 import ShiftSelector from "../components/ShiftSelector";
 
+// ─── Helpers ───────────────────────────────────────────
+const shiftLabel = {
+  morning: "Morning",
+  afternoon: "Afternoon",
+  evening: "Evening",
+  fullday: "Full Day",
+};
+const shiftColor = {
+  morning: "bg-amber-50 text-amber-700 border-amber-200",
+  afternoon: "bg-sky-50 text-sky-700 border-sky-200",
+  evening: "bg-violet-50 text-violet-700 border-violet-200",
+  fullday: "bg-emerald-50 text-emerald-700 border-emerald-200",
+};
+
+function addMonths(dateStr, months) {
+  // endDate ko months extend karo
+  const base = dateStr ? new Date(dateStr) : new Date();
+  // agar date already expire ho gayi hai toh aaj se count karo
+  const start = base < new Date() ? new Date() : base;
+  start.setMonth(start.getMonth() + months);
+  return start.toISOString().slice(0, 10);
+}
+
+// ─── Main Component ────────────────────────────────────
 export default function StudentProfile() {
   const navigate = useNavigate();
-
-  const { user } = useAuth();
-  useEffect(() => {
-    const fetchStudentId = async () => {
-      if (!user?.uid) return;
-
-      try {
-        const userSnap = await getDoc(doc(db, "users", user.uid));
-
-        if (userSnap.exists()) {
-          const data = userSnap.data();
-
-          setId(data.studentId);
-        }
-      } catch (e) {
-        console.error(e);
-      }
-    };
-
-    fetchStudentId();
-  }, [user]);
-
-  const [id, setId] = useState(null);
+  const { id } = useParams();
   const photoInputRef = useRef(null);
 
   const [student, setStudent] = useState(null);
@@ -54,14 +65,25 @@ export default function StudentProfile() {
   const [toast, setToast] = useState(null);
   const [mounted, setMounted] = useState(false);
 
+  // Renewal states
+  const [showRenewModal, setShowRenewModal] = useState(false);
+  const [renewMonths, setRenewMonths] = useState(1);
+  const [renewAmount, setRenewAmount] = useState("");
+  const [renewNote, setRenewNote] = useState("");
+  const [renewLoading, setRenewLoading] = useState(false);
+
+  // Payment history
+  const [payments, setPayments] = useState([]);
+  const [payTab, setPayTab] = useState("details"); // "details" | "payments"
+
   useEffect(() => {
     if (!id) return;
-
     setMounted(true);
-
     fetchStudent();
+    fetchPayments();
   }, [id]);
 
+  // ── Data Fetching ──────────────────────────────────────
   const fetchStudent = async () => {
     setLoading(true);
     try {
@@ -81,17 +103,32 @@ export default function StudentProfile() {
         });
         setQrDataURL(url);
       }
-    } catch (e) {
+    } catch {
       showToast("Failed to load student.", "error");
     }
     setLoading(false);
   };
 
+  const fetchPayments = async () => {
+    try {
+      const q = query(
+        collection(db, "students", id, "payments"),
+        orderBy("paidAt", "desc"),
+      );
+      const snap = await getDocs(q);
+      setPayments(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    } catch {
+      /* silent */
+    }
+  };
+
+  // ── Utilities ──────────────────────────────────────────
   const showToast = (msg, type = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
   };
 
+  // ── Form Handlers ──────────────────────────────────────
   const handleChange = (e) => {
     const { name, value } = e.target;
     if (name === "aadhaar") {
@@ -141,7 +178,6 @@ export default function StudentProfile() {
         await uploadBytes(sRef, photoFile);
         photoURL = await getDownloadURL(sRef);
       }
-
       const updatedData = {
         ...form,
         aadhaar: (form.aadhaar || "").replace(/\s/g, ""),
@@ -150,14 +186,13 @@ export default function StudentProfile() {
         photoURL,
         updatedAt: new Date().toISOString(),
       };
-
       await updateDoc(doc(db, "students", id), updatedData);
       setStudent({ ...updatedData, id });
       setPhotoFile(null);
       setPhotoPreview(null);
       setEditing(false);
       showToast("Student updated successfully!");
-    } catch (e) {
+    } catch {
       showToast("Failed to save changes.", "error");
     }
     setSaving(false);
@@ -173,31 +208,95 @@ export default function StudentProfile() {
       }
       await deleteDoc(doc(db, "students", id));
       navigate("/students", { state: { deleted: student.name } });
-    } catch (e) {
+    } catch {
       showToast("Failed to delete student.", "error");
       setDeleting(false);
       setShowDeleteModal(false);
     }
   };
 
+  // ── Renewal Handler ────────────────────────────────────
+  const handleRenew = async () => {
+    if (
+      !renewAmount ||
+      isNaN(Number(renewAmount)) ||
+      Number(renewAmount) <= 0
+    ) {
+      showToast("Please enter a valid amount.", "error");
+      return;
+    }
+    setRenewLoading(true);
+    try {
+      const newEndDate = addMonths(student.endDate, renewMonths);
+
+      // 1. Payment record — student ke subcollection mein save karo
+      await addDoc(collection(db, "students", id, "payments"), {
+        amount: Number(renewAmount),
+        months: renewMonths,
+        note: renewNote.trim(),
+        paidAt: new Date().toISOString(),
+        prevEndDate: student.endDate || null,
+        newEndDate,
+      });
+
+      // 2. Global payments collection mein bhi save karo (Finance page ke liye)
+      await addDoc(collection(db, "payments"), {
+        studentId: id,
+        studentName: student.name,
+        seatNumber: student.seatNumber,
+        shift: student.shift,
+        amount: Number(renewAmount),
+        months: renewMonths,
+        note: renewNote.trim(),
+        paidAt: new Date().toISOString(),
+        type: "renewal",
+      });
+
+      // 3. Student ka endDate + status update karo
+      await updateDoc(doc(db, "students", id), {
+        endDate: newEndDate,
+        status: "active",
+        updatedAt: new Date().toISOString(),
+      });
+
+      // 4. Local state update
+      setStudent((prev) => ({
+        ...prev,
+        endDate: newEndDate,
+        status: "active",
+      }));
+      setForm((prev) => ({ ...prev, endDate: newEndDate, status: "active" }));
+
+      await fetchPayments();
+      setShowRenewModal(false);
+      setRenewMonths(1);
+      setRenewAmount("");
+      setRenewNote("");
+      showToast(
+        `✅ Renewed for ${renewMonths} month${renewMonths > 1 ? "s" : ""}! New end: ${newEndDate}`,
+      );
+    } catch (e) {
+      showToast("Renewal failed: " + e.message, "error");
+    }
+    setRenewLoading(false);
+  };
+
+  // ── QR Handlers ────────────────────────────────────────
   const handleShareQR = async () => {
     if (!qrDataURL) return;
     const blob = await (await fetch(qrDataURL)).blob();
     const file = new File([blob], `${student.name}_QR.png`, {
       type: "image/png",
     });
-
     if (navigator.canShare?.({ files: [file] })) {
       try {
         await navigator.share({
           files: [file],
           title: `${student.name}'s Attendance QR`,
-          text: `Seat ${student.seatNumber} — ${student.shift} shift`,
         });
         return;
       } catch (_) {}
     }
-
     const link = document.createElement("a");
     link.href = qrDataURL;
     link.download = `${student.name}_QR.png`;
@@ -212,26 +311,19 @@ export default function StudentProfile() {
     window.open(`https://wa.me/91${student.phone}?text=${msg}`, "_blank");
   };
 
-  const shiftLabel = {
-    morning: "Morning",
-    afternoon: "Afternoon",
-    evening: "Evening",
-    fullday: "Full Day",
-  };
-  const shiftColor = {
-    morning: "bg-amber-50 text-amber-700 border-amber-200",
-    afternoon: "bg-sky-50 text-sky-700 border-sky-200",
-    evening: "bg-violet-50 text-violet-700 border-violet-200",
-    fullday: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  };
-
+  // ── Derived Values ─────────────────────────────────────
   const daysLeft = student?.endDate
-    ? Math.max(
-        0,
-        Math.ceil((new Date(student.endDate) - new Date()) / 86400000),
-      )
+    ? Math.ceil((new Date(student.endDate) - new Date()) / 86400000)
     : null;
 
+  const isExpired = daysLeft !== null && daysLeft < 0;
+  const isExpiringSoon = daysLeft !== null && daysLeft >= 0 && daysLeft <= 7;
+
+  const previewEndDate = showRenewModal
+    ? addMonths(student?.endDate, renewMonths)
+    : null;
+
+  // ── Loading ────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
@@ -242,20 +334,18 @@ export default function StudentProfile() {
       </div>
     );
   }
+  if (!student) return null;
 
+  // ─────────────────────────────────────────────────────
   return (
     <div
       className={`min-h-screen bg-slate-50 px-4 py-6 sm:px-6 lg:px-8 transition-all duration-500 ${mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"}`}
     >
       <div className="mx-auto max-w-3xl">
-        {/* Toast */}
+        {/* ── Toast ── */}
         {toast && (
           <div
-            className={`fixed top-4 right-4 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-lg text-sm font-medium animate-slide-in-right ${
-              toast.type === "error"
-                ? "bg-red-50 border border-red-200 text-red-700"
-                : "bg-emerald-50 border border-emerald-200 text-emerald-700"
-            }`}
+            className={`fixed top-4 right-4 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-lg text-sm font-medium animate-slide-in-right ${toast.type === "error" ? "bg-red-50 border border-red-200 text-red-700" : "bg-emerald-50 border border-emerald-200 text-emerald-700"}`}
           >
             {toast.type === "error" ? (
               <svg
@@ -290,7 +380,7 @@ export default function StudentProfile() {
           </div>
         )}
 
-        {/* Back + Actions Header */}
+        {/* ── Back + Actions ── */}
         <div className="flex items-center justify-between mb-6 animate-fade-in-down">
           <button
             onClick={() => navigate(-1)}
@@ -314,6 +404,29 @@ export default function StudentProfile() {
           <div className="flex items-center gap-2">
             {!editing ? (
               <>
+                {/* ── RENEW BUTTON ── */}
+                <button
+                  onClick={() => {
+                    setRenewAmount(String(student.feeAmount || ""));
+                    setShowRenewModal(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 active:scale-95 transition-all duration-150"
+                >
+                  <svg
+                    className="w-3.5 h-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2.2}
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+                    />
+                  </svg>
+                  Renew
+                </button>
                 <button
                   onClick={() => setEditing(true)}
                   className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 active:scale-95 transition-all duration-150"
@@ -372,7 +485,7 @@ export default function StudentProfile() {
                   disabled={saving}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 active:scale-95 transition-all"
                 >
-                  {saving ? (
+                  {saving && (
                     <svg
                       className="w-3.5 h-3.5 animate-spin"
                       fill="none"
@@ -392,7 +505,7 @@ export default function StudentProfile() {
                         d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                       />
                     </svg>
-                  ) : null}
+                  )}
                   {saving ? "Saving..." : "Save Changes"}
                 </button>
               </>
@@ -400,10 +513,76 @@ export default function StudentProfile() {
           </div>
         </div>
 
-        {/* Profile Hero Card */}
+        {/* ── Expired Banner ── */}
+        {isExpired && (
+          <div className="mb-4 flex items-center justify-between gap-3 px-4 py-3 bg-red-50 border border-red-200 rounded-2xl animate-fade-up">
+            <div className="flex items-center gap-2.5">
+              <span className="text-lg">⚠️</span>
+              <div>
+                <p className="text-sm font-bold text-red-700">
+                  Subscription Expired
+                </p>
+                <p className="text-xs text-red-500">
+                  {Math.abs(daysLeft)} din pehle expire hua — {student.endDate}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setRenewAmount(String(student.feeAmount || ""));
+                setShowRenewModal(true);
+              }}
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white bg-red-500 hover:bg-red-600 active:scale-95 transition-all"
+            >
+              <svg
+                className="w-3 h-3"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2.5}
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+                />
+              </svg>
+              Abhi Renew Karo
+            </button>
+          </div>
+        )}
+
+        {/* ── Expiring Soon Banner ── */}
+        {isExpiringSoon && !isExpired && (
+          <div className="mb-4 flex items-center justify-between gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-2xl animate-fade-up">
+            <div className="flex items-center gap-2.5">
+              <span className="text-lg">🔔</span>
+              <div>
+                <p className="text-sm font-bold text-amber-700">
+                  Subscription Jald Expire Hogi
+                </p>
+                <p className="text-xs text-amber-600">
+                  Sirf {daysLeft} din bacha hai — {student.endDate} ko expire
+                  hogi
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setRenewAmount(String(student.feeAmount || ""));
+                setShowRenewModal(true);
+              }}
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-amber-700 bg-amber-100 border border-amber-300 hover:bg-amber-200 active:scale-95 transition-all"
+            >
+              Renew Karo
+            </button>
+          </div>
+        )}
+
+        {/* ── Profile Hero Card ── */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-5 animate-fade-up">
           <div className="px-5 py-6 sm:px-6 flex items-start gap-5">
-            {/* Avatar */}
+            {/* Photo */}
             <div className="relative flex-shrink-0">
               <div className="w-20 h-20 rounded-2xl overflow-hidden bg-indigo-100 border-2 border-indigo-100">
                 {photoPreview || student.photoURL ? (
@@ -476,18 +655,25 @@ export default function StudentProfile() {
                 <span className="text-sm text-slate-500">
                   Seat {student.seatNumber}
                 </span>
-                {student.status === "active" && (
-                  <>
-                    <span className="text-slate-400 text-xs">•</span>
-                    <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-                      Active
-                    </span>
-                  </>
+                {/* Status badge */}
+                <span className="text-slate-400 text-xs">•</span>
+                {isExpired ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-red-600">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block" />
+                    Expired
+                  </span>
+                ) : isExpiringSoon ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block animate-pulse" />
+                    Expiring Soon
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                    Active
+                  </span>
                 )}
               </div>
-
-              {/* Stats row */}
               <div className="grid grid-cols-3 gap-3 mt-4">
                 <StatBox
                   label="Monthly Fee"
@@ -495,8 +681,15 @@ export default function StudentProfile() {
                 />
                 <StatBox
                   label="Days Left"
-                  value={daysLeft !== null ? daysLeft : "—"}
-                  warn={daysLeft !== null && daysLeft <= 7}
+                  value={
+                    daysLeft !== null
+                      ? isExpired
+                        ? `${Math.abs(daysLeft)}d ago`
+                        : daysLeft
+                      : "—"
+                  }
+                  warn={isExpired}
+                  positive={daysLeft !== null && !isExpired && !isExpiringSoon}
                 />
                 <StatBox
                   label="Joined"
@@ -514,12 +707,33 @@ export default function StudentProfile() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-          {/* Left — Details Card */}
-          <div
-            className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-fade-up"
-            style={{ animationDelay: "0.05s" }}
-          >
+        {/* ── Tab Bar ── */}
+        <div className="flex gap-1 bg-white border border-slate-200 rounded-2xl p-1.5 mb-5 shadow-sm">
+          {[
+            { id: "details", label: "Details", icon: "📋" },
+            {
+              id: "payments",
+              label: `History (${payments.length})`,
+              icon: "💳",
+            },
+            { id: "qr", label: "QR Code", icon: "⬛" },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setPayTab(tab.id)}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 ${payTab === tab.id ? "bg-indigo-600 text-white shadow-md" : "text-slate-500 hover:bg-slate-50"}`}
+            >
+              <span>{tab.icon}</span>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ═══════════════════════════════════════════════
+            TAB: DETAILS
+        ═══════════════════════════════════════════════ */}
+        {payTab === "details" && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-fade-up">
             <div className="px-5 py-4 border-b border-slate-100">
               <h2 className="text-sm font-bold text-slate-800">
                 Student Details
@@ -594,7 +808,7 @@ export default function StudentProfile() {
                     value={form.seatNumber || ""}
                     onChange={handleChange}
                     min={1}
-                    max={30}
+                    max={200}
                     className="mt-1 w-full rounded-xl border border-slate-200 text-slate-800 text-sm px-3 py-2 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50 transition-all"
                   />
                 ) : (
@@ -658,7 +872,7 @@ export default function StudentProfile() {
                     />
                   ) : (
                     <p
-                      className={`mt-0.5 text-sm font-medium ${daysLeft !== null && daysLeft <= 7 ? "text-red-600" : "text-slate-700"}`}
+                      className={`mt-0.5 text-sm font-medium ${isExpired ? "text-red-600" : isExpiringSoon ? "text-amber-600" : "text-slate-700"}`}
                     >
                       {student.endDate || "—"}
                     </p>
@@ -688,12 +902,124 @@ export default function StudentProfile() {
               </div>
             </div>
           </div>
+        )}
 
-          {/* Right — QR Card */}
-          <div
-            className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-fade-up"
-            style={{ animationDelay: "0.1s" }}
-          >
+        {/* ═══════════════════════════════════════════════
+            TAB: PAYMENT HISTORY
+        ═══════════════════════════════════════════════ */}
+        {payTab === "payments" && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-fade-up">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-bold text-slate-800">
+                  Payment History
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Saare renewal records
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setRenewAmount(String(student.feeAmount || ""));
+                  setShowRenewModal(true);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 active:scale-95 transition-all"
+              >
+                + New Renewal
+              </button>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {payments.length === 0 ? (
+                <div className="flex flex-col items-center gap-3 py-12 text-slate-400">
+                  <span className="text-4xl">💳</span>
+                  <p className="text-sm font-semibold">
+                    Koi payment record nahi
+                  </p>
+                  <p className="text-xs">Pehli renewal karein!</p>
+                </div>
+              ) : (
+                payments.map((p, i) => (
+                  <div
+                    key={p.id}
+                    className="px-5 py-4 flex items-start gap-3"
+                    style={{ animationDelay: `${i * 0.05}s` }}
+                  >
+                    <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <svg
+                        className="w-4 h-4 text-emerald-600"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z"
+                        />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-bold text-slate-800">
+                          ₹{p.amount.toLocaleString("en-IN")}
+                        </p>
+                        <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-100">
+                          {p.months} month{p.months > 1 ? "s" : ""}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <p className="text-xs text-slate-400">
+                          {new Date(p.paidAt).toLocaleDateString("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })}
+                        </p>
+                        {p.newEndDate && (
+                          <>
+                            <span className="text-slate-300">•</span>
+                            <p className="text-xs text-slate-500">
+                              Renewed till{" "}
+                              <span className="font-semibold text-slate-700">
+                                {p.newEndDate}
+                              </span>
+                            </p>
+                          </>
+                        )}
+                      </div>
+                      {p.note && (
+                        <p className="text-xs text-slate-400 mt-1 italic">
+                          "{p.note}"
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            {/* Total summary */}
+            {payments.length > 0 && (
+              <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+                <p className="text-xs font-semibold text-slate-500">
+                  {payments.length} payments total
+                </p>
+                <p className="text-sm font-bold text-slate-800">
+                  Total: ₹
+                  {payments
+                    .reduce((s, p) => s + (p.amount || 0), 0)
+                    .toLocaleString("en-IN")}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════
+            TAB: QR CODE
+        ═══════════════════════════════════════════════ */}
+        {payTab === "qr" && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-fade-up">
             <div className="px-5 py-4 border-b border-slate-100">
               <h2 className="text-sm font-bold text-slate-800">
                 Attendance QR Code
@@ -775,10 +1101,207 @@ export default function StudentProfile() {
               )}
             </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Delete Confirm Modal */}
+      {/* ══════════════════════════════════════════════════
+          RENEWAL MODAL
+      ══════════════════════════════════════════════════ */}
+      {showRenewModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 animate-fade-in"
+          style={{ background: "rgba(15,23,42,0.5)" }}
+        >
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-md animate-scale-in overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-6 pt-6 pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+                  <svg
+                    className="w-5 h-5 text-emerald-600"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2.2}
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+                    />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">
+                    Subscription Renew Karo
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {student.name} · Seat {student.seatNumber}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-5 space-y-5">
+              {/* Duration Selector */}
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block">
+                  Duration Select Karo
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[1, 3, 6, 12].map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setRenewMonths(m)}
+                      className={`py-2.5 rounded-xl text-sm font-bold border transition-all active:scale-95 ${renewMonths === m ? "bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-600/20" : "bg-slate-50 text-slate-600 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50"}`}
+                    >
+                      {m}M
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Amount */}
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block">
+                  Payment Amount (₹)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
+                    ₹
+                  </span>
+                  <input
+                    type="number"
+                    value={renewAmount}
+                    onChange={(e) => setRenewAmount(e.target.value)}
+                    placeholder={String(student.feeAmount || "")}
+                    className="w-full pl-7 pr-4 py-3 rounded-xl border border-slate-200 text-slate-800 font-bold text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50 transition-all"
+                  />
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  Monthly fee: ₹{student.feeAmount || 0} → {renewMonths} month =
+                  ₹
+                  {((student.feeAmount || 0) * renewMonths).toLocaleString(
+                    "en-IN",
+                  )}{" "}
+                  expected
+                </p>
+              </div>
+
+              {/* Note */}
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block">
+                  Note (optional)
+                </label>
+                <input
+                  type="text"
+                  value={renewNote}
+                  onChange={(e) => setRenewNote(e.target.value)}
+                  placeholder="e.g. Cash payment, UPI, discount..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50 transition-all"
+                />
+              </div>
+
+              {/* Preview Card */}
+              <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-4">
+                <p className="text-xs font-bold text-emerald-700 uppercase tracking-wide mb-2">
+                  Preview
+                </p>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-emerald-600">Current end date</p>
+                    <p className="text-sm font-bold text-slate-700">
+                      {student.endDate || "Not set"}
+                    </p>
+                  </div>
+                  <svg
+                    className="w-5 h-5 text-emerald-400"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M17.25 8.25L21 12m0 0l-3.75 3.75M21 12H3"
+                    />
+                  </svg>
+                  <div className="text-right">
+                    <p className="text-xs text-emerald-600">New end date</p>
+                    <p className="text-sm font-bold text-emerald-700">
+                      {previewEndDate}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-emerald-200 flex items-center justify-between">
+                  <p className="text-xs text-emerald-600">Duration</p>
+                  <p className="text-sm font-bold text-emerald-700">
+                    {renewMonths} month{renewMonths > 1 ? "s" : ""} extension
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 pb-6 flex gap-3">
+              <button
+                onClick={() => {
+                  setShowRenewModal(false);
+                  setRenewNote("");
+                }}
+                className="flex-1 py-3 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors active:scale-95"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRenew}
+                disabled={renewLoading || !renewAmount}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-all active:scale-95"
+              >
+                {renewLoading ? (
+                  <svg
+                    className="w-4 h-4 animate-spin"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                ) : (
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2.5}
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M4.5 12.75l6 6 9-13.5"
+                    />
+                  </svg>
+                )}
+                {renewLoading ? "Processing..." : "Confirm Renewal"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Modal ── */}
       {showDeleteModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in"
@@ -821,7 +1344,7 @@ export default function StudentProfile() {
                 disabled={deleting}
                 className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-500 hover:bg-red-600 disabled:bg-red-300 transition-colors"
               >
-                {deleting ? (
+                {deleting && (
                   <svg
                     className="w-3.5 h-3.5 animate-spin"
                     fill="none"
@@ -841,7 +1364,7 @@ export default function StudentProfile() {
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                     />
                   </svg>
-                ) : null}
+                )}
                 {deleting ? "Deleting…" : "Yes, Delete"}
               </button>
             </div>
@@ -849,28 +1372,30 @@ export default function StudentProfile() {
         </div>
       )}
 
+      {/* ── Animations ── */}
       <style>{`
-        @keyframes fade-in-down { from { opacity:0; transform:translateY(-10px) } to { opacity:1; transform:translateY(0) } }
-        @keyframes fade-up { from { opacity:0; transform:translateY(16px) } to { opacity:1; transform:translateY(0) } }
-        @keyframes slide-in-right { from { opacity:0; transform:translateX(20px) } to { opacity:1; transform:translateX(0) } }
-        @keyframes fade-in { from { opacity:0 } to { opacity:1 } }
-        @keyframes scale-in { from { opacity:0; transform:scale(0.95) } to { opacity:1; transform:scale(1) } }
-        .animate-fade-in-down { animation: fade-in-down 0.35s ease both; }
-        .animate-fade-up { animation: fade-up 0.4s ease both; }
-        .animate-slide-in-right { animation: slide-in-right 0.3s ease both; }
-        .animate-fade-in { animation: fade-in 0.2s ease both; }
-        .animate-scale-in { animation: scale-in 0.25s ease both; }
+        @keyframes fade-in-down  { from { opacity:0; transform:translateY(-10px) } to { opacity:1; transform:translateY(0) } }
+        @keyframes fade-up       { from { opacity:0; transform:translateY(16px)  } to { opacity:1; transform:translateY(0) } }
+        @keyframes slide-in-right{ from { opacity:0; transform:translateX(20px)  } to { opacity:1; transform:translateX(0) } }
+        @keyframes fade-in       { from { opacity:0 }                              to { opacity:1 } }
+        @keyframes scale-in      { from { opacity:0; transform:scale(0.95) }       to { opacity:1; transform:scale(1) } }
+        .animate-fade-in-down  { animation: fade-in-down  0.35s ease both; }
+        .animate-fade-up       { animation: fade-up       0.4s  ease both; }
+        .animate-slide-in-right{ animation: slide-in-right 0.3s ease both; }
+        .animate-fade-in       { animation: fade-in       0.2s  ease both; }
+        .animate-scale-in      { animation: scale-in      0.25s ease both; }
       `}</style>
     </div>
   );
 }
 
-function StatBox({ label, value, warn }) {
+// ── StatBox ────────────────────────────────────────────
+function StatBox({ label, value, warn, positive }) {
   return (
     <div className="bg-slate-50 rounded-xl px-3 py-2.5 text-center">
       <p className="text-xs text-slate-400 font-medium">{label}</p>
       <p
-        className={`text-base font-bold mt-0.5 ${warn ? "text-red-500" : "text-slate-800"}`}
+        className={`text-base font-bold mt-0.5 ${warn ? "text-red-500" : positive ? "text-emerald-600" : "text-slate-800"}`}
       >
         {value}
       </p>

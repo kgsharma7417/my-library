@@ -29,7 +29,7 @@ export default function Navbar() {
 
   const links = [
     {
-      to: "/",
+      to: "/dashboard", // ← "/" se "/dashboard" karo
       label: "Dashboard",
       icon: (
         <svg

@@ -1,895 +1,841 @@
 // src/pages/Reminders.jsx
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
-import dayjs from "dayjs";
+import { useNavigate } from "react-router-dom";
 
-// ── Skeleton Card ─────────────────────────────────────────────
-function SkeletonCard() {
-  return (
-    <div style={{ padding: "14px 0", borderBottom: "1px solid #f1f5f9" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-        }}
-      >
-        <div style={{ flex: 1 }}>
-          <div
-            className="rem-skeleton"
-            style={{
-              width: "40%",
-              height: 16,
-              borderRadius: 6,
-              marginBottom: 8,
-            }}
-          />
-          <div
-            className="rem-skeleton"
-            style={{ width: "65%", height: 12, borderRadius: 6 }}
-          />
-        </div>
-        <div
-          className="rem-skeleton"
-          style={{ width: 130, height: 36, borderRadius: 10 }}
-        />
-      </div>
-    </div>
-  );
+// ─── Helpers ───────────────────────────────────────────
+function daysLeft(endDate) {
+  if (!endDate) return null;
+  return Math.ceil((new Date(endDate) - new Date()) / 86400000);
 }
 
-// ── Donut Chart (SVG) ─────────────────────────────────────────
-function DonutChart({ data }) {
-  const total = data.reduce((s, d) => s + d.value, 0);
-  if (total === 0) return null;
+// Pre-made WhatsApp message templates
+const TEMPLATES = {
+  expired: (s, days) =>
+    `Namaste ${s.name} ji! 🙏\n\nLibraryPro se yaad dilaana tha ki aapki library membership *${Math.abs(days)} din pehle expire* ho gayi hai.\n\n📅 Expiry date thi: *${s.endDate}*\n🪑 Aapki seat: *${s.seatNumber}*\n\nKripya jald se jald renewal karein warna seat kisi aur ko de di jayegi.\n\nShukriya! 📚`,
 
-  let offset = 0;
-  const r = 42,
-    cx = 54,
-    cy = 54,
-    circ = 2 * Math.PI * r;
+  expiringSoon: (s, days) =>
+    `Namaste ${s.name} ji! 🔔\n\nAapki LibraryPro membership *${days} din mein expire* hone wali hai.\n\n📅 Expiry date: *${s.endDate}*\n🪑 Seat: *${s.seatNumber}*\n\nAbhi renew karein aur apni seat secure rakhen!\n\nShukriya! 📚`,
 
-  return (
-    <svg width="108" height="108" viewBox="0 0 108 108">
-      <circle
-        cx={cx}
-        cy={cy}
-        r={r}
-        fill="none"
-        stroke="#f1f5f9"
-        strokeWidth="16"
-      />
-      {data.map((d, i) => {
-        const pct = d.value / total;
-        const dash = pct * circ;
-        const gap = circ - dash;
-        const rotation = offset * 360 - 90;
-        offset += pct;
-        return (
-          <circle
-            key={i}
-            cx={cx}
-            cy={cy}
-            r={r}
-            fill="none"
-            stroke={d.color}
-            strokeWidth="16"
-            strokeDasharray={`${dash} ${gap}`}
-            strokeDashoffset={0}
-            transform={`rotate(${rotation} ${cx} ${cy})`}
-            style={{ transition: "stroke-dasharray 0.6s ease" }}
-          />
-        );
-      })}
-      <text
-        x={cx}
-        y={cy - 6}
-        textAnchor="middle"
-        fontSize="18"
-        fontWeight="800"
-        fill="#1e293b"
-      >
-        {total}
-      </text>
-      <text
-        x={cx}
-        y={cy + 12}
-        textAnchor="middle"
-        fontSize="9"
-        fill="#94a3b8"
-        fontWeight="600"
-      >
-        PENDING
-      </text>
-    </svg>
-  );
-}
+  custom: (s) =>
+    `Namaste ${s.name} ji! 📚\n\nLibraryPro ki taraf se ek important notification hai.\nKripya library se sampark karein.\n\nShukriya!`,
+};
 
+const shiftColors = {
+  morning: { bg: "#fef3c7", text: "#92400e", label: "Morning" },
+  evening: { bg: "#dbeafe", text: "#1e40af", label: "Evening" },
+  fullday: { bg: "#ede9fe", text: "#5b21b6", label: "Full Day" },
+  afternoon: { bg: "#dcfce7", text: "#166534", label: "Afternoon" },
+};
+
+// ─── Main Component ────────────────────────────────────
 export default function Reminders() {
+  const navigate = useNavigate();
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [sent, setSent] = useState({});
-  const [renewed, setRenewed] = useState({});
-  const [contacted, setContacted] = useState({});
-  const [search, setSearch] = useState("");
-  const [bulkSending, setBulkSending] = useState(null);
-  const [toast, setToast] = useState(null);
   const [mounted, setMounted] = useState(false);
+  const [activeGroup, setActiveGroup] = useState("expired"); // "expired" | "soon" | "all"
+  const [sentSet, setSentSet] = useState(new Set()); // track karo kis ko message gaya
 
-  const hour = new Date().getHours();
-  const greeting =
-    hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  // Custom message modal
+  const [customModal, setCustomModal] = useState(null); // { student } | null
+  const [customMsg, setCustomMsg] = useState("");
 
   useEffect(() => {
     fetchStudents();
-    setTimeout(() => setMounted(true), 60);
   }, []);
 
-  const showToast = (msg, type = "success") => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  };
-
   const fetchStudents = async () => {
-    const snap = await getDocs(collection(db, "students"));
-    setStudents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    setLoading(false);
-  };
-
-  const today = dayjs();
-
-  const filterBySearch = (list) => {
-    if (!search.trim()) return list;
-    const q = search.toLowerCase();
-    return list.filter(
-      (s) =>
-        s.name?.toLowerCase().includes(q) ||
-        s.phone?.includes(q) ||
-        String(s.seatNumber).includes(q),
-    );
-  };
-
-  const expireIn3Days = useMemo(
-    () =>
-      students.filter((s) => {
-        if (!s.endDate || renewed[s.id]) return false;
-        return dayjs(s.endDate).diff(today, "day") === 3;
-      }),
-    [students, renewed],
-  );
-
-  const expireIn1Day = useMemo(
-    () =>
-      students.filter((s) => {
-        if (!s.endDate || renewed[s.id]) return false;
-        return dayjs(s.endDate).diff(today, "day") === 1;
-      }),
-    [students, renewed],
-  );
-
-  const expireToday = useMemo(
-    () =>
-      students.filter((s) => {
-        if (!s.endDate || renewed[s.id]) return false;
-        const diff = dayjs(s.endDate).diff(today, "day");
-        return diff === 0 || diff === -1;
-      }),
-    [students, renewed],
-  );
-
-  const totalPending =
-    expireIn3Days.length + expireIn1Day.length + expireToday.length;
-
-  const buildMsg = (student, type) => {
-    if (type === "3days")
-      return `Hello ${student.name}! 📚\n\nLibraryPro reminder: Aapki library membership *3 din mein expire hone wali hai* (${student.endDate}).\n\nKripya jald renew karein taaki aapki seat (No. ${student.seatNumber}) safe rahe.\n\nDhanyawaad! 🙏`;
-    if (type === "1day")
-      return `Hello ${student.name}! ⚠️\n\n*Urgent Reminder:* Aapki library membership *kal expire ho rahi hai* (${student.endDate}).\n\nAaj hi renew karein — seat No. ${student.seatNumber} hold hai abhi tak.\n\nLibraryPro 📚`;
-    return `Hello ${student.name}! 🚨\n\n*Final Alert:* Aapki library membership *aaj expire ho rahi hai*.\n\nRenew na karne par aapka access block ho jayega aur seat No. ${student.seatNumber} release kar di jayegi.\n\nAbhi contact karein. — LibraryPro 📚`;
-  };
-
-  const sendWhatsApp = (student, type) => {
-    const msg = encodeURIComponent(buildMsg(student, type));
-    window.open(`https://wa.me/91${student.phone}?text=${msg}`, "_blank");
-    setSent((prev) => ({ ...prev, [student.id + type]: true }));
-  };
-
-  const handleBulkSend = async (list, type) => {
-    setBulkSending(type);
-    for (let i = 0; i < list.length; i++) {
-      setTimeout(() => {
-        const msg = encodeURIComponent(buildMsg(list[i], type));
-        window.open(`https://wa.me/91${list[i].phone}?text=${msg}`, "_blank");
-        setSent((prev) => ({ ...prev, [list[i].id + type]: true }));
-      }, i * 800);
+    setLoading(true);
+    try {
+      const snap = await getDocs(collection(db, "students"));
+      setStudents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    } catch (e) {
+      console.error(e);
     }
-    setTimeout(() => {
-      setBulkSending(null);
-      showToast(`${list.length} messages bheje gaye!`);
-    }, list.length * 800);
+    setLoading(false);
+    setTimeout(() => setMounted(true), 60);
   };
 
-  const exportCSV = () => {
-    const all = [
-      ...expireIn3Days.map((s) => ({ ...s, bucket: "3 Din Mein" })),
-      ...expireIn1Day.map((s) => ({ ...s, bucket: "Kal Expire" })),
-      ...expireToday.map((s) => ({ ...s, bucket: "Aaj Expire" })),
-    ];
-    const header = "Name,Phone,Seat,Shift,End Date,Category";
-    const rows = all.map(
-      (s) =>
-        `${s.name},${s.phone},${s.seatNumber},${s.shift},${s.endDate},${s.bucket}`,
-    );
-    const csv = [header, ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `reminders_${dayjs().format("YYYY-MM-DD")}.csv`;
-    a.click();
-    showToast("CSV download ho gaya!");
+  // ── Grouping Logic ─────────────────────────────────────
+  const expired = students
+    .filter((s) => {
+      const d = daysLeft(s.endDate);
+      return d !== null && d < 0;
+    })
+    .sort((a, b) => daysLeft(a.endDate) - daysLeft(b.endDate));
+
+  const expiringSoon = students
+    .filter((s) => {
+      const d = daysLeft(s.endDate);
+      return d !== null && d >= 0 && d <= 7;
+    })
+    .sort((a, b) => daysLeft(a.endDate) - daysLeft(b.endDate));
+
+  const allDue = [...expired, ...expiringSoon];
+
+  const displayList =
+    activeGroup === "expired"
+      ? expired
+      : activeGroup === "soon"
+        ? expiringSoon
+        : allDue;
+
+  // ── Send WhatsApp ──────────────────────────────────────
+  const sendWhatsApp = (student, templateType = null) => {
+    const days = daysLeft(student.endDate);
+    const type = templateType || (days < 0 ? "expired" : "expiringSoon");
+    const msg = encodeURIComponent(TEMPLATES[type](student, days));
+    window.open(`https://wa.me/91${student.phone}?text=${msg}`, "_blank");
+    setSentSet((prev) => new Set(prev).add(student.id));
   };
 
-  // ── Section Component ─────────────────────────────────────────
-  const ReminderSection = ({ title, color, bgColor, list, type, icon }) => {
-    const filtered = filterBySearch(list);
-    const allSent =
-      filtered.length > 0 && filtered.every((s) => sent[s.id + type]);
+  const sendCustom = () => {
+    if (!customModal || !customMsg.trim()) return;
+    const msg = encodeURIComponent(customMsg);
+    window.open(`https://wa.me/91${customModal.phone}?text=${msg}`, "_blank");
+    setSentSet((prev) => new Set(prev).add(customModal.id));
+    setCustomModal(null);
+    setCustomMsg("");
+  };
 
+  // Bulk send — saare ek ek karke open karo (1 second gap)
+  const bulkSend = () => {
+    if (
+      !window.confirm(
+        `${displayList.length} students ko WhatsApp message bhejoge?`,
+      )
+    )
+      return;
+    displayList.forEach((s, i) => {
+      setTimeout(() => sendWhatsApp(s), i * 1200);
+    });
+  };
+
+  // ── Loading ────────────────────────────────────────────
+  if (loading) {
     return (
-      <div className="rem-card" style={{ borderTop: `4px solid ${color}` }}>
-        {/* Header */}
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "#f0f2f8",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
         <div
           style={{
             display: "flex",
+            flexDirection: "column",
             alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: 10,
-            marginBottom: 16,
+            gap: 14,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: "50%",
+              border: "4px solid #e0e7ff",
+              borderTopColor: "#6366f1",
+              animation: "spin 0.8s linear infinite",
+            }}
+          />
+          <p
+            style={{
+              fontSize: 14,
+              color: "#9ca3af",
+              fontFamily: "Inter, sans-serif",
+            }}
+          >
+            Loading reminders…
+          </p>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  // ─────────────────────────────────────────────────────
+  return (
+    <>
+      <style>{`
+        .rem-page {
+          min-height: 100vh;
+          background: #f0f2f8;
+          padding: 28px 16px 60px;
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+          opacity: 0; transform: translateY(14px);
+          transition: opacity 0.45s ease, transform 0.45s ease;
+        }
+        .rem-page.mounted { opacity: 1; transform: translateY(0); }
+        .rem-wrap { max-width: 840px; margin: 0 auto; }
+
+        /* Header */
+        .rem-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 22px; }
+        .rem-header-left { display: flex; align-items: center; gap: 13px; }
+        .rem-icon { width: 46px; height: 46px; border-radius: 14px; background: linear-gradient(135deg, #f59e0b, #fbbf24); display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(245,158,11,0.35); flex-shrink: 0; }
+        .rem-title { font-size: 22px; font-weight: 800; color: #1e1b4b; margin: 0 0 2px; letter-spacing: -0.4px; }
+        .rem-sub { font-size: 13px; color: #6b7280; margin: 0; }
+
+        /* Summary pills */
+        .rem-pills { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+        .rem-pill { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 14px; font-size: 13px; font-weight: 700; border: 1.5px solid; transition: all 0.2s ease; cursor: pointer; }
+
+        /* Tabs */
+        .rem-tabs { display: flex; gap: 4px; background: #fff; border: 1.5px solid #e5e7eb; border-radius: 16px; padding: 5px; margin-bottom: 18px; box-shadow: 0 2px 10px rgba(0,0,0,0.04); }
+        .rem-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 8px; border-radius: 11px; font-size: 13px; font-weight: 700; cursor: pointer; border: none; transition: all 0.2s; font-family: inherit; color: #6b7280; background: transparent; }
+        .rem-tab.active { background: linear-gradient(135deg, #f59e0b, #fbbf24); color: #fff; box-shadow: 0 3px 10px rgba(245,158,11,0.3); }
+        .rem-tab:not(.active):hover { background: #fffbeb; color: #d97706; }
+        .rem-badge { font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 6px; }
+        .rem-tab.active .rem-badge { background: rgba(255,255,255,0.3); color: #fff; }
+        .rem-tab:not(.active) .rem-badge { background: #fee2e2; color: #ef4444; }
+
+        /* Panel */
+        .rem-panel { background: #fff; border: 1.5px solid #e5e7eb; border-radius: 20px; overflow: hidden; box-shadow: 0 2px 16px rgba(0,0,0,0.04); animation: fadeUp 0.3s cubic-bezier(.22,1,.36,1); }
+        .rem-panel-head { padding: 18px 20px; border-bottom: 1.5px solid #f1f3f9; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+        .rem-panel-title { font-size: 14px; font-weight: 800; color: #1e1b4b; margin: 0 0 2px; }
+        .rem-panel-sub { font-size: 12px; color: #9ca3af; margin: 0; }
+
+        /* Student card */
+        .rem-card { margin: 12px 16px; border-radius: 16px; border: 1.5px solid #e5e7eb; overflow: hidden; transition: box-shadow 0.2s; animation: fadeUp 0.35s cubic-bezier(.22,1,.36,1) both; }
+        .rem-card:hover { box-shadow: 0 6px 20px rgba(0,0,0,0.08); }
+        .rem-card-top { display: flex; align-items: center; gap: 12px; padding: 14px 16px; }
+        .rem-av { width: 42px; height: 42px; border-radius: 13px; display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 800; flex-shrink: 0; }
+        .rem-card-bottom { padding: 0 16px 14px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+        /* Buttons */
+        .rem-btn { display: flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 12px; font-size: 13px; font-weight: 700; border: none; cursor: pointer; font-family: inherit; transition: all 0.18s ease; }
+        .rem-btn:hover { transform: translateY(-1px); }
+        .rem-btn:active { transform: scale(0.97); }
+
+        /* Bulk button */
+        .rem-bulk { display: flex; align-items: center; gap: 8px; padding: 11px 20px; border-radius: 14px; font-size: 13px; font-weight: 800; border: none; cursor: pointer; font-family: inherit; background: linear-gradient(135deg, #25d366, #128c7e); color: white; box-shadow: 0 4px 14px rgba(37,211,102,0.3); transition: all 0.2s ease; }
+        .rem-bulk:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(37,211,102,0.4); }
+        .rem-bulk:active { transform: scale(0.97); }
+
+        /* Empty */
+        .rem-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 60px 20px; color: #9ca3af; }
+
+        /* Sent chip */
+        .rem-sent { display: flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: #10b981; background: #ecfdf5; padding: 4px 10px; border-radius: 8px; border: 1px solid #a7f3d0; }
+
+        /* Modal overlay */
+        .rem-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: flex-end; justify-content: center; padding: 16px; background: rgba(15,23,42,0.5); animation: fadeIn 0.2s ease; }
+        @media (min-width: 640px) { .rem-overlay { align-items: center; } }
+        .rem-modal { background: #fff; border-radius: 24px; width: 100%; max-width: 480px; overflow: hidden; animation: scaleIn 0.25s cubic-bezier(.22,1,.36,1); }
+
+        @keyframes fadeUp   { from { opacity:0; transform:translateY(12px) } to { opacity:1; transform:translateY(0) } }
+        @keyframes fadeIn   { from { opacity:0 } to { opacity:1 } }
+        @keyframes scaleIn  { from { opacity:0; transform:scale(0.95) } to { opacity:1; transform:scale(1) } }
+        @keyframes spin     { to { transform: rotate(360deg); } }
+      `}</style>
+
+      <div className={`rem-page${mounted ? " mounted" : ""}`}>
+        <div className="rem-wrap">
+          {/* ── Header ── */}
+          <div className="rem-header">
+            <div className="rem-header-left">
+              <div className="rem-icon">
+                <svg
+                  width="22"
+                  height="22"
+                  fill="none"
+                  stroke="white"
+                  strokeWidth="2.2"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"
+                  />
+                </svg>
+              </div>
+              <div>
+                <h1 className="rem-title">Reminders</h1>
+                <p className="rem-sub">WhatsApp se fee reminders bhejo</p>
+              </div>
+            </div>
+
+            {/* Bulk Send button */}
+            {displayList.length > 0 && (
+              <button className="rem-bulk" onClick={bulkSend}>
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                >
+                  <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z" />
+                  <path d="M12 0C5.373 0 0 5.373 0 12c0 2.124.554 4.118 1.525 5.847L.057 23.57a.75.75 0 00.918.919l5.82-1.488A11.948 11.948 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22.5a10.46 10.46 0 01-5.399-1.497l-.386-.228-4.003 1.024 1.053-3.9-.252-.4A10.463 10.463 0 011.5 12C1.5 6.21 6.21 1.5 12 1.5S22.5 6.21 22.5 12 17.79 22.5 12 22.5z" />
+                </svg>
+                Sabko Message Bhejo ({displayList.length})
+              </button>
+            )}
+          </div>
+
+          {/* ── Summary Pills ── */}
+          <div className="rem-pills">
             <div
+              className="rem-pill"
               style={{
-                width: 36,
-                height: 36,
-                borderRadius: 10,
-                background: bgColor,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 18,
+                background: "#fef2f2",
+                borderColor: "#fecaca",
+                color: "#991b1b",
               }}
             >
-              {icon}
-            </div>
-            <div>
-              <h3
+              <span
                 style={{
-                  margin: 0,
-                  color: "#1e293b",
-                  fontSize: 15,
-                  fontWeight: 800,
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: "#ef4444",
+                  display: "inline-block",
                 }}
-              >
-                {title}
-              </h3>
-              <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>
-                {filtered.length} student{filtered.length !== 1 ? "s" : ""}
-              </p>
+              />
+              <span>{expired.length} Expired</span>
             </div>
-          </div>
-          {filtered.length > 1 && (
-            <button
-              className="rem-bulk-btn"
-              style={{ background: allSent ? "#94a3b8" : color }}
-              onClick={() => !allSent && handleBulkSend(filtered, type)}
-              disabled={allSent || bulkSending === type}
+            <div
+              className="rem-pill"
+              style={{
+                background: "#fffbeb",
+                borderColor: "#fde68a",
+                color: "#92400e",
+              }}
             >
-              {bulkSending === type ? (
-                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span className="rem-spin" />
-                  Sending…
-                </span>
-              ) : allSent ? (
-                "✅ Sab Sent"
-              ) : (
-                `📲 Bulk Send (${filtered.length})`
-              )}
-            </button>
-          )}
-        </div>
-
-        {filtered.length === 0 ? (
-          <div
-            style={{ textAlign: "center", padding: "24px 0", color: "#94a3b8" }}
-          >
-            <div style={{ fontSize: 28, marginBottom: 6 }}>✅</div>
-            <p style={{ margin: 0, fontSize: 13 }}>
-              {search
-                ? "Search mein koi match nahi"
-                : "Is category mein koi student nahi"}
-            </p>
-          </div>
-        ) : (
-          filtered.map((student, i) => {
-            const wasSent = sent[student.id + type];
-            const wasRenewed = renewed[student.id];
-            const daysLeft = dayjs(student.endDate).diff(today, "day");
-
-            return (
-              <div
-                key={student.id}
-                className="rem-row"
+              <span
                 style={{
-                  animationDelay: `${i * 0.04}s`,
-                  opacity: wasRenewed ? 0.5 : 1,
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: "#f59e0b",
+                  display: "inline-block",
+                  animation: "pulse 1.5s infinite",
                 }}
+              />
+              <span>{expiringSoon.length} Expiring in 7 days</span>
+            </div>
+            <div
+              className="rem-pill"
+              style={{
+                background: "#ecfdf5",
+                borderColor: "#a7f3d0",
+                color: "#065f46",
+              }}
+            >
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: "#10b981",
+                  display: "inline-block",
+                }}
+              />
+              <span>{sentSet.size} Messages sent today</span>
+            </div>
+          </div>
+
+          {/* ── Tabs ── */}
+          <div className="rem-tabs">
+            {[
+              {
+                id: "expired",
+                label: "Expired",
+                icon: "🔴",
+                badge: expired.length,
+              },
+              {
+                id: "soon",
+                label: "Expiring Soon",
+                icon: "🟡",
+                badge: expiringSoon.length,
+              },
+              { id: "all", label: "All Due", icon: "📋", badge: allDue.length },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                className={`rem-tab${activeGroup === tab.id ? " active" : ""}`}
+                onClick={() => setActiveGroup(tab.id)}
               >
-                {/* Avatar */}
+                <span>{tab.icon}</span>
+                <span>{tab.label}</span>
+                {tab.badge > 0 && (
+                  <span className="rem-badge">{tab.badge}</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* ── Panel ── */}
+          <div className="rem-panel">
+            <div className="rem-panel-head">
+              <div>
+                <p className="rem-panel-title">
+                  {activeGroup === "expired"
+                    ? "Expired Students"
+                    : activeGroup === "soon"
+                      ? "7 Din Mein Expire"
+                      : "Saare Due Students"}
+                </p>
+                <p className="rem-panel-sub">
+                  {displayList.length} students · Click karo aur WhatsApp
+                  message bhejo
+                </p>
+              </div>
+            </div>
+
+            {displayList.length === 0 ? (
+              <div className="rem-empty">
+                <span style={{ fontSize: 44 }}>🎉</span>
+                <p style={{ fontSize: 15, fontWeight: 700, color: "#065f46" }}>
+                  {activeGroup === "expired"
+                    ? "Koi expired student nahi!"
+                    : activeGroup === "soon"
+                      ? "Koi jald expire nahi ho raha!"
+                      : "Sab students up-to-date hain!"}
+                </p>
+                <p style={{ fontSize: 13 }}>
+                  Filhaal koi reminder bhejne ki zaroorat nahi.
+                </p>
+              </div>
+            ) : (
+              <div style={{ padding: "8px 0 8px" }}>
+                {displayList.map((s, i) => {
+                  const left = daysLeft(s.endDate);
+                  const isExp = left < 0;
+                  const shift = shiftColors[s.shift] || shiftColors.morning;
+                  const wasSent = sentSet.has(s.id);
+
+                  return (
+                    <div
+                      key={s.id}
+                      className="rem-card"
+                      style={{
+                        animationDelay: `${Math.min(i * 0.04, 0.3)}s`,
+                        borderColor: isExp ? "#fecaca" : "#fde68a",
+                        background: isExp ? "#fffafa" : "#fffdf7",
+                      }}
+                    >
+                      {/* Top row */}
+                      <div className="rem-card-top">
+                        <div
+                          className="rem-av"
+                          style={{
+                            background: isExp ? "#fee2e2" : "#fef3c7",
+                            color: isExp ? "#ef4444" : "#d97706",
+                          }}
+                        >
+                          {s.name?.charAt(0)?.toUpperCase() || "?"}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <p
+                              style={{
+                                fontSize: 14,
+                                fontWeight: 700,
+                                color: "#1e1b4b",
+                                margin: 0,
+                              }}
+                            >
+                              {s.name}
+                            </p>
+                            {wasSent && (
+                              <span className="rem-sent">
+                                <svg
+                                  width="10"
+                                  height="10"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.5"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="M4.5 12.75l6 6 9-13.5"
+                                  />
+                                </svg>
+                                Sent
+                              </span>
+                            )}
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 8,
+                              alignItems: "center",
+                              marginTop: 5,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                padding: "2px 8px",
+                                borderRadius: 6,
+                                background: shift.bg,
+                                color: shift.text,
+                              }}
+                            >
+                              {shift.label}
+                            </span>
+                            <span style={{ fontSize: 11, color: "#9ca3af" }}>
+                              Seat {s.seatNumber}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                color: "#6b7280",
+                                fontWeight: 600,
+                              }}
+                            >
+                              📱 {s.phone}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 800,
+                                padding: "2px 10px",
+                                borderRadius: 8,
+                                background: isExp ? "#fee2e2" : "#fef3c7",
+                                color: isExp ? "#991b1b" : "#92400e",
+                              }}
+                            >
+                              {isExp
+                                ? `${Math.abs(left)}d overdue`
+                                : `${left}d left`}
+                            </span>
+                          </div>
+                        </div>
+                        {/* Fee */}
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <p
+                            style={{
+                              fontSize: 15,
+                              fontWeight: 800,
+                              color: "#6366f1",
+                              margin: "0 0 2px",
+                            }}
+                          >
+                            ₹{Number(s.feeAmount).toLocaleString("en-IN")}
+                          </p>
+                          <p
+                            style={{
+                              fontSize: 11,
+                              color: "#9ca3af",
+                              margin: 0,
+                            }}
+                          >
+                            {s.endDate}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="rem-card-bottom">
+                        {/* Quick WhatsApp — template auto-select */}
+                        <button
+                          className="rem-btn"
+                          onClick={() => sendWhatsApp(s)}
+                          style={{
+                            background: "#25d366",
+                            color: "#fff",
+                            flex: 1,
+                            justifyContent: "center",
+                          }}
+                        >
+                          <svg
+                            width="15"
+                            height="15"
+                            viewBox="0 0 24 24"
+                            fill="currentColor"
+                          >
+                            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z" />
+                            <path d="M12 0C5.373 0 0 5.373 0 12c0 2.124.554 4.118 1.525 5.847L.057 23.57a.75.75 0 00.918.919l5.82-1.488A11.948 11.948 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22.5a10.46 10.46 0 01-5.399-1.497l-.386-.228-4.003 1.024 1.053-3.9-.252-.4A10.463 10.463 0 011.5 12C1.5 6.21 6.21 1.5 12 1.5S22.5 6.21 22.5 12 17.79 22.5 12 22.5z" />
+                          </svg>
+                          WhatsApp Reminder
+                        </button>
+
+                        {/* Custom message */}
+                        <button
+                          className="rem-btn"
+                          onClick={() => {
+                            setCustomModal(s);
+                            setCustomMsg(TEMPLATES.custom(s));
+                          }}
+                          style={{
+                            background: "#eef2ff",
+                            color: "#6366f1",
+                            border: "1.5px solid #c7d2fe",
+                          }}
+                        >
+                          <svg
+                            width="14"
+                            height="14"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"
+                            />
+                          </svg>
+                          Custom
+                        </button>
+
+                        {/* Profile link */}
+                        <button
+                          className="rem-btn"
+                          onClick={() => navigate(`/students/${s.id}`)}
+                          style={{
+                            background: "#f8fafc",
+                            color: "#64748b",
+                            border: "1.5px solid #e2e8f0",
+                          }}
+                        >
+                          <svg
+                            width="14"
+                            height="14"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
+                            />
+                          </svg>
+                          Profile
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* ── Message Templates Info ── */}
+          <div
+            style={{
+              marginTop: 20,
+              background: "#fff",
+              border: "1.5px solid #e5e7eb",
+              borderRadius: 16,
+              padding: 20,
+            }}
+          >
+            <p
+              style={{
+                fontSize: 13,
+                fontWeight: 800,
+                color: "#1e1b4b",
+                margin: "0 0 12px",
+              }}
+            >
+              📝 Auto Message Templates
+            </p>
+            <div style={{ display: "grid", gap: 10 }}>
+              {[
+                {
+                  label: "🔴 Expired Student",
+                  desc: "Kitne din se expire hua, seat jaane ki warning, jaldi renew karo",
+                },
+                {
+                  label: "🟡 Expiring Soon",
+                  desc: "Kitne din bacha hai, seat secure karne ka request",
+                },
+              ].map((t) => (
+                <div
+                  key={t.label}
+                  style={{
+                    background: "#f8fafc",
+                    borderRadius: 10,
+                    padding: "10px 14px",
+                    display: "flex",
+                    gap: 10,
+                    alignItems: "flex-start",
+                  }}
+                >
+                  <p
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: "#374151",
+                      margin: 0,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {t.label}
+                  </p>
+                  <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>
+                    {t.desc}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Custom Message Modal ── */}
+      {customModal && (
+        <div
+          className="rem-overlay"
+          onClick={(e) => e.target === e.currentTarget && setCustomModal(null)}
+        >
+          <div className="rem-modal">
+            <div
+              style={{
+                padding: "20px 20px 16px",
+                borderBottom: "1.5px solid #f1f3f9",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <div
                   style={{
                     width: 40,
                     height: 40,
                     borderRadius: 12,
-                    flexShrink: 0,
-                    background: bgColor,
+                    background: "#fef3c7",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
+                    fontSize: 18,
                     fontWeight: 800,
-                    fontSize: 16,
-                    color: color,
+                    color: "#d97706",
+                    flexShrink: 0,
                   }}
                 >
-                  {student.name?.charAt(0).toUpperCase()}
+                  {customModal.name?.charAt(0)?.toUpperCase()}
                 </div>
-
-                {/* Info */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
+                <div>
+                  <p
                     style={{
-                      fontWeight: 700,
                       fontSize: 14,
-                      color: "#1e293b",
-                      marginBottom: 3,
+                      fontWeight: 800,
+                      color: "#1e1b4b",
+                      margin: "0 0 2px",
                     }}
                   >
-                    {student.name}
-                    {wasRenewed && (
-                      <span
-                        style={{
-                          marginLeft: 8,
-                          fontSize: 11,
-                          background: "#dcfce7",
-                          color: "#166534",
-                          padding: "2px 8px",
-                          borderRadius: 6,
-                          fontWeight: 700,
-                        }}
-                      >
-                        ✓ Renewed
-                      </span>
-                    )}
-                  </div>
-                  <div
-                    style={{
-                      color: "#64748b",
-                      fontSize: 12,
-                      display: "flex",
-                      gap: 8,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <span>📱 {student.phone}</span>
-                    <span>🪑 Seat {student.seatNumber}</span>
-                    <span
-                      style={{
-                        background:
-                          daysLeft <= 0
-                            ? "#fee2e2"
-                            : daysLeft === 1
-                              ? "#ffedd5"
-                              : "#fef9c3",
-                        color:
-                          daysLeft <= 0
-                            ? "#991b1b"
-                            : daysLeft === 1
-                              ? "#9a3412"
-                              : "#854d0e",
-                        padding: "1px 7px",
-                        borderRadius: 6,
-                        fontWeight: 700,
-                      }}
-                    >
-                      {daysLeft <= 0 ? "Aaj/Overdue" : `${daysLeft}d left`}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                  <button
-                    title="Renewed mark karo"
-                    onClick={() => {
-                      setRenewed((p) => ({
-                        ...p,
-                        [student.id]: !p[student.id],
-                      }));
-                      showToast(
-                        renewed[student.id]
-                          ? "Renewed mark hataya"
-                          : `${student.name} renewed mark kiya!`,
-                      );
-                    }}
-                    style={{
-                      width: 34,
-                      height: 34,
-                      borderRadius: 9,
-                      border: "1.5px solid",
-                      borderColor: wasRenewed ? "#86efac" : "#e2e8f0",
-                      background: wasRenewed ? "#dcfce7" : "#f8fafc",
-                      color: wasRenewed ? "#16a34a" : "#94a3b8",
-                      cursor: "pointer",
-                      fontSize: 14,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      transition: "all 0.15s",
-                    }}
-                  >
-                    ✓
-                  </button>
-                  <button
-                    className="rem-wa-btn"
-                    style={{ background: wasSent ? "#94a3b8" : "#25d366" }}
-                    onClick={() => sendWhatsApp(student, type)}
-                  >
-                    {wasSent ? "✅ Sent" : "📲 Send"}
-                  </button>
+                    {customModal.name}
+                  </p>
+                  <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>
+                    📱 +91 {customModal.phone}
+                  </p>
                 </div>
               </div>
-            );
-          })
-        )}
-      </div>
-    );
-  };
+            </div>
 
-  return (
-    <>
-      <style>{`
-        .rem-page {
-          max-width: 920px;
-          margin: 0 auto;
-          padding: 28px 16px 56px;
-          font-family: 'Inter', -apple-system, sans-serif;
-          opacity: 0; transform: translateY(16px);
-          transition: opacity 0.45s ease, transform 0.45s ease;
-        }
-        .rem-page.mounted { opacity: 1; transform: translateY(0); }
-
-        .rem-card {
-          background: #fff;
-          border-radius: 18px;
-          padding: 20px;
-          box-shadow: 0 2px 16px rgba(0,0,0,0.06);
-          margin-bottom: 20px;
-          border: 1.5px solid #f1f5f9;
-          animation: fadeUp 0.4s cubic-bezier(.22,1,.36,1) both;
-        }
-
-        .rem-row {
-          display: flex; align-items: center; gap: 12px;
-          padding: 11px 0; border-bottom: 1px solid #f8fafc;
-          animation: fadeUp 0.35s cubic-bezier(.22,1,.36,1) both;
-          transition: background 0.15s;
-        }
-        .rem-row:last-child { border-bottom: none; }
-        .rem-row:hover { background: #fafbff; border-radius: 10px; padding-left: 6px; padding-right: 6px; }
-
-        .rem-wa-btn {
-          color: #fff; border: none;
-          padding: 8px 14px; border-radius: 9px;
-          font-size: 12px; font-weight: 700; cursor: pointer;
-          transition: all 0.15s ease; white-space: nowrap;
-          font-family: inherit;
-        }
-        .rem-wa-btn:hover { transform: translateY(-1px); filter: brightness(1.08); }
-
-        .rem-bulk-btn {
-          color: #fff; border: none;
-          padding: 8px 16px; border-radius: 10px;
-          font-size: 12px; font-weight: 700; cursor: pointer;
-          transition: all 0.15s ease; font-family: inherit;
-        }
-        .rem-bulk-btn:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.08); }
-        .rem-bulk-btn:disabled { cursor: not-allowed; }
-
-        .rem-skeleton {
-          background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
-          background-size: 200% 100%;
-          animation: shimmer 1.4s infinite;
-        }
-        @keyframes shimmer {
-          from { background-position: 200% 0; }
-          to { background-position: -200% 0; }
-        }
-
-        .rem-spin {
-          width: 12px; height: 12px; border-radius: 50%;
-          border: 2px solid rgba(255,255,255,0.4);
-          border-top-color: #fff;
-          animation: spin 0.7s linear infinite;
-          display: inline-block;
-        }
-
-        .rem-search {
-          width: 100%; box-sizing: border-box;
-          padding: 10px 12px 10px 38px;
-          border: 1.5px solid #e2e8f0; border-radius: 12px;
-          font-size: 14px; outline: none; font-family: inherit;
-          background: #fafbff; color: #1e293b;
-          transition: border-color 0.18s, box-shadow 0.18s;
-        }
-        .rem-search:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
-
-        .rem-toast {
-          position: fixed; bottom: 24px; right: 24px; z-index: 999;
-          padding: 12px 18px; border-radius: 12px;
-          font-size: 13px; font-weight: 700;
-          box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-          animation: slideUp 0.3s cubic-bezier(.22,1,.36,1);
-          display: flex; align-items: center; gap: 8px;
-        }
-
-        @keyframes fadeUp {
-          from { opacity:0; transform:translateY(12px); }
-          to { opacity:1; transform:translateY(0); }
-        }
-        @keyframes slideUp {
-          from { opacity:0; transform:translateY(16px); }
-          to { opacity:1; transform:translateY(0); }
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes countUp {
-          from { opacity:0; transform: scale(0.8); }
-          to { opacity:1; transform: scale(1); }
-        }
-      `}</style>
-
-      <div className={`rem-page${mounted ? " mounted" : ""}`}>
-        {/* Toast */}
-        {toast && (
-          <div
-            className="rem-toast"
-            style={{
-              background: toast.type === "error" ? "#fee2e2" : "#ecfdf5",
-              color: toast.type === "error" ? "#991b1b" : "#065f46",
-              border: `1.5px solid ${toast.type === "error" ? "#fca5a5" : "#a7f3d0"}`,
-            }}
-          >
-            {toast.type === "error" ? "❌" : "✅"} {toast.msg}
-          </div>
-        )}
-
-        {/* Header */}
-        <div style={{ marginBottom: 24, animation: "fadeUp 0.4s ease both" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              flexWrap: "wrap",
-              gap: 12,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div
+            <div style={{ padding: 20 }}>
+              <label
                 style={{
-                  width: 46,
-                  height: 46,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "#6b7280",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.5px",
+                  display: "block",
+                  marginBottom: 8,
+                }}
+              >
+                Message Edit Karo
+              </label>
+              <textarea
+                value={customMsg}
+                onChange={(e) => setCustomMsg(e.target.value)}
+                rows={8}
+                style={{
+                  width: "100%",
+                  padding: "12px 14px",
                   borderRadius: 14,
-                  background: "linear-gradient(135deg, #f59e0b, #d97706)",
+                  border: "1.5px solid #e5e7eb",
+                  fontSize: 13,
+                  fontFamily: "inherit",
+                  color: "#374151",
+                  outline: "none",
+                  resize: "vertical",
+                  boxSizing: "border-box",
+                  lineHeight: 1.6,
+                }}
+              />
+              <p style={{ fontSize: 11, color: "#9ca3af", margin: "6px 0 0" }}>
+                {customMsg.length} characters
+              </p>
+            </div>
+
+            <div style={{ padding: "0 20px 20px", display: "flex", gap: 10 }}>
+              <button
+                onClick={() => {
+                  setCustomModal(null);
+                  setCustomMsg("");
+                }}
+                style={{
+                  flex: 1,
+                  padding: "12px",
+                  borderRadius: 14,
+                  border: "1.5px solid #e5e7eb",
+                  background: "#f8fafc",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: "#64748b",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={sendCustom}
+                style={{
+                  flex: 1,
+                  padding: "12px",
+                  borderRadius: 14,
+                  border: "none",
+                  background: "#25d366",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: 22,
-                  boxShadow: "0 4px 14px rgba(245,158,11,0.3)",
+                  gap: 8,
                 }}
               >
-                🔔
-              </div>
-              <div>
-                <h2
-                  style={{
-                    margin: 0,
-                    fontSize: 22,
-                    fontWeight: 800,
-                    color: "#1e1b4b",
-                    letterSpacing: "-0.4px",
-                  }}
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
                 >
-                  Reminder Center
-                </h2>
-                <p style={{ margin: 0, fontSize: 13, color: "#94a3b8" }}>
-                  {greeting}!{" "}
-                  {totalPending > 0
-                    ? `${totalPending} urgent reminders hain aaj`
-                    : "Sab clear hai aaj 🎉"}
-                </p>
-              </div>
+                  <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z" />
+                  <path d="M12 0C5.373 0 0 5.373 0 12c0 2.124.554 4.118 1.525 5.847L.057 23.57a.75.75 0 00.918.919l5.82-1.488A11.948 11.948 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22.5 10.46 10.46 10.46 0 01-5.399-1.497l-.386-.228-4.003 1.024 1.053-3.9-.252-.4A10.463 10.463 0 011.5 12C1.5 6.21 6.21 1.5 12 1.5S22.5 6.21 22.5 12 17.79 22.5 12 22.5z" />
+                </svg>
+                WhatsApp Bhejo
+              </button>
             </div>
-            <button
-              onClick={exportCSV}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 7,
-                padding: "9px 16px",
-                borderRadius: 11,
-                background: "#fff",
-                border: "1.5px solid #e2e8f0",
-                fontSize: 13,
-                fontWeight: 700,
-                color: "#475569",
-                cursor: "pointer",
-                transition: "all 0.15s ease",
-                fontFamily: "inherit",
-              }}
-              onMouseOver={(e) =>
-                (e.currentTarget.style.borderColor = "#6366f1")
-              }
-              onMouseOut={(e) =>
-                (e.currentTarget.style.borderColor = "#e2e8f0")
-              }
-            >
-              📥 Export CSV
-            </button>
           </div>
         </div>
-
-        {/* Summary Banner with Donut */}
-        <div
-          style={{
-            background:
-              totalPending > 0
-                ? "linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)"
-                : "linear-gradient(135deg, #064e3b, #065f46)",
-            borderRadius: 20,
-            padding: "20px 24px",
-            color: "white",
-            marginBottom: 24,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: 16,
-            boxShadow: "0 8px 32px rgba(99,102,241,0.2)",
-            animation: "fadeUp 0.45s ease both",
-          }}
-        >
-          <div>
-            <div
-              style={{
-                fontSize: 36,
-                fontWeight: 800,
-                lineHeight: 1,
-                animation: "countUp 0.5s ease both",
-              }}
-            >
-              {totalPending}
-            </div>
-            <div style={{ fontSize: 14, opacity: 0.8, marginTop: 4 }}>
-              Reminders Pending
-            </div>
-            <div
-              style={{
-                display: "flex",
-                gap: 16,
-                marginTop: 12,
-                flexWrap: "wrap",
-              }}
-            >
-              {[
-                { label: "3 Din", val: expireIn3Days.length, color: "#fbbf24" },
-                { label: "Kal", val: expireIn1Day.length, color: "#fb923c" },
-                { label: "Aaj", val: expireToday.length, color: "#f87171" },
-              ].map((s) => (
-                <div
-                  key={s.label}
-                  style={{ display: "flex", alignItems: "center", gap: 6 }}
-                >
-                  <div
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: 3,
-                      background: s.color,
-                    }}
-                  />
-                  <span style={{ fontSize: 13, opacity: 0.9 }}>
-                    {s.val} {s.label}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-          {!loading && (
-            <DonutChart
-              data={[
-                { value: expireIn3Days.length, color: "#fbbf24" },
-                { value: expireIn1Day.length, color: "#fb923c" },
-                { value: expireToday.length, color: "#f87171" },
-              ]}
-            />
-          )}
-        </div>
-
-        {/* Search */}
-        <div
-          style={{
-            position: "relative",
-            marginBottom: 20,
-            animation: "fadeUp 0.45s ease both",
-          }}
-        >
-          <span
-            style={{
-              position: "absolute",
-              left: 12,
-              top: "50%",
-              transform: "translateY(-50%)",
-              color: "#94a3b8",
-              fontSize: 15,
-            }}
-          >
-            🔍
-          </span>
-          <input
-            className="rem-search"
-            placeholder="Search by naam, phone, ya seat…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          {search && (
-            <button
-              onClick={() => setSearch("")}
-              style={{
-                position: "absolute",
-                right: 12,
-                top: "50%",
-                transform: "translateY(-50%)",
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                color: "#94a3b8",
-                fontSize: 16,
-              }}
-            >
-              ×
-            </button>
-          )}
-        </div>
-
-        {/* Sections */}
-        {loading ? (
-          <>
-            {[1, 2, 3].map((n) => (
-              <div
-                key={n}
-                className="rem-card"
-                style={{ borderTop: "4px solid #e2e8f0" }}
-              >
-                <div
-                  className="rem-skeleton"
-                  style={{
-                    width: "30%",
-                    height: 18,
-                    borderRadius: 6,
-                    marginBottom: 16,
-                  }}
-                />
-                {[1, 2].map((k) => (
-                  <SkeletonCard key={k} />
-                ))}
-              </div>
-            ))}
-          </>
-        ) : (
-          <>
-            <ReminderSection
-              title="3 Din Mein Expire"
-              color="#f59e0b"
-              bgColor="#fef9c3"
-              list={expireIn3Days}
-              type="3days"
-              icon="🟡"
-            />
-            <ReminderSection
-              title="Kal Expire Hoga"
-              color="#f97316"
-              bgColor="#ffedd5"
-              list={expireIn1Day}
-              type="1day"
-              icon="🟠"
-            />
-            <ReminderSection
-              title="Aaj Expire / Overdue"
-              color="#ef4444"
-              bgColor="#fee2e2"
-              list={expireToday}
-              type="today"
-              icon="🔴"
-            />
-          </>
-        )}
-
-        {/* Footer stats */}
-        {!loading && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: 12,
-              marginTop: 8,
-              animation: "fadeUp 0.5s ease both",
-            }}
-          >
-            {[
-              {
-                label: "Total Renewed (Session)",
-                val: Object.values(renewed).filter(Boolean).length,
-                color: "#10b981",
-                bg: "#ecfdf5",
-              },
-              {
-                label: "Messages Sent",
-                val: Object.keys(sent).length,
-                color: "#6366f1",
-                bg: "#eef2ff",
-              },
-              {
-                label: "Still Pending",
-                val: Math.max(
-                  0,
-                  totalPending - Object.values(renewed).filter(Boolean).length,
-                ),
-                color: "#f59e0b",
-                bg: "#fffbeb",
-              },
-            ].map((s) => (
-              <div
-                key={s.label}
-                style={{
-                  background: s.bg,
-                  borderRadius: 14,
-                  padding: "14px 16px",
-                  border: `1.5px solid ${s.bg}`,
-                  textAlign: "center",
-                }}
-              >
-                <div style={{ fontSize: 24, fontWeight: 800, color: s.color }}>
-                  {s.val}
-                </div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: "#64748b",
-                    fontWeight: 600,
-                    marginTop: 2,
-                  }}
-                >
-                  {s.label}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      )}
     </>
   );
 }
